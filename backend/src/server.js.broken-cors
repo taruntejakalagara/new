@@ -1,0 +1,49 @@
+const express = require('express');
+const Database = require('better-sqlite3');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+const db = new Database(path.join(__dirname, '../valet.db'));
+
+// Enable CORS for all origins (including Android WebView)
+app.use(cors({
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Add explicit OPTIONS handling for preflight
+app.options('*', cors());
+
+app.use(express.json());
+
+// Store db in app
+app.set('db', db);
+
+// Routes
+const driversRouter = require('./routes/drivers');
+const vehiclesRouter = require('./routes/vehicles');
+const checkinRouter = require('./routes/checkin');
+const retrievalRouter = require('./routes/retrieval');
+const stationRouter = require('./routes/station');
+
+app.use('/api/drivers', driversRouter);
+app.use('/api/vehicles', vehiclesRouter);
+app.use('/api', checkinRouter);
+app.use('/api', retrievalRouter);
+app.use('/api/station', stationRouter);
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 4000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+  console.log(`✅ Accessible at http://192.168.12.231:${PORT}`);
+  console.log(`✅ CORS enabled for all origins (including Android)`);
+});

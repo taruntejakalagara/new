@@ -1,0 +1,1079 @@
+const express = require('express');
+const router = express.Router();
+const Database = require('better-sqlite3');
+const path = require('path');
+
+
+// Health check
+router.get('/health', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get statistics
+router.get('/stats', (req, res) => {
+  try {
+    const parkedCount = db.prepare('SELECT COUNT(*) as count FROM vehicles WHERE status = ?').get('parked');
+    const totalCount = db.prepare('SELECT COUNT(*) as count FROM vehicles').get();
+    
+    res.json({
+      success: true,
+      parked: parkedCount.count,
+      total: totalCount.count
+    });
+  } catch (error) {
+    console.error('Error getting stats:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Check-in vehicle
+router.post('/checkin', (req, res) => {
+  const db = req.app.get('db');
+  const io = req.app.get('io');
+  
+  try {
+    const { cardId, licensePlate, make, model, color, phone, hook_number } = req.body;
+    
+    console.log('✅ Check-in request:', { cardId, licensePlate, hook_number });
+
+    // Auto-assign hook if not provided
+    let assignedHook = hook_number;
+    if (!assignedHook) {
+      const nextHook = db.prepare(`
+        SELECT hook_number 
+        FROM hooks 
+        WHERE status = 'available' 
+        ORDER BY hook_number 
+        LIMIT 1
+      `).get();
+      assignedHook = nextHook ? nextHook.hook_number : null;
+      console.log('✅ Found hook:', nextHook);
+      console.log('✅ Assigned hook number:', assignedHook);
+      if (!assignedHook) {
+        return res.status(400).json({ success: false, message: 'No available hooks' });
+      }
+    }
+
+    // Get sequence number
+    const lastVehicle = db.prepare('SELECT MAX(sequence_number) as max FROM vehicles').get();
+    const sequenceNumber = (lastVehicle.max || 0) + 1;
+
+    // Insert vehicle
+    const stmt = db.prepare(`
+      INSERT INTO vehicles 
+      (unique_card_id, sequence_number, license_plate, make, model, color, customer_phone, hook_number, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parked')
+    `);
+    
+    const result = stmt.run(
+      cardId, 
+      sequenceNumber,
+      licensePlate || 'PENDING', 
+      make || 'Unknown', 
+      model || 'Unknown', 
+      color || 'Unknown', 
+      phone || '', 
+      assignedHook
+    );
+    
+    const vehicleId = result.lastInsertRowid;
+    
+    // Mark hook as occupied
+    console.log(`🔧 Marking hook ${assignedHook} as occupied...`);
+    db.prepare('UPDATE hooks SET status = ? WHERE hook_number = ?').run('occupied', assignedHook);
+    
+    const hookCheck = db.prepare("SELECT status FROM hooks WHERE hook_number = ?").get(assignedHook);
+    console.log(`✅ Hook ${assignedHook} status after update:`, hookCheck);
+    console.log(`✅ Vehicle ${vehicleId} checked in at hook ${assignedHook}`);
+    
+    io.emit('vehicleCheckedIn', { vehicleId, hook_number: assignedHook });
+    io.emit('vehicleCheckedIn', { vehicleId, hook_number });
+    
+    res.json({ 
+      success: true, 
+      vehicleId,
+      sequenceNumber,
+      assignedHook
+    });
+    
+  } catch (error) {
+    console.error('❌ Check-in error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// Get all vehicles
+router.get('/vehicles', (req, res) => {
+  const db = req.app.get('db');
+  try {
+    const vehicles = db.prepare(`
+      SELECT 
+        v.*,
+        r.id as request_id,
+        r.status as retrieval_status,
+        r.assigned_driver_id,
+        d.fullName as driver_name
+      FROM vehicles v
+      LEFT JOIN retrieval_requests r ON v.unique_card_id = r.unique_card_id 
+        AND r.status IN ('pending', 'assigned', 'retrieving')
+      LEFT JOIN drivers d ON r.assigned_driver_id = d.id
+      WHERE v.status = 'parked'
+      ORDER BY v.check_in_time DESC
+    `).all();
+    res.json({ success: true, vehicles });
+  } catch (error) {
+    console.error('Error getting vehicles:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Request vehicle retrieval
+router.post('/request', (req, res) => {
+  const db = req.app.get('db');
+  try {
+    const { unique_card_id, is_priority } = req.body;
+    
+    console.log('🚗 Retrieval request:', { unique_card_id, is_priority });
+
+    const vehicle = db.prepare('SELECT * FROM vehicles WHERE unique_card_id = ? AND status = ?').get(unique_card_id, 'parked');
+    
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: 'Vehicle not found or already retrieved' });
+    }
+
+
+    // Check for existing active request
+    const existingRequest = db.prepare(`
+      SELECT * FROM retrieval_requests 
+      WHERE unique_card_id = ? 
+      AND status IN ('pending', 'assigned', 'retrieving')
+    `).get(unique_card_id);
+
+    if (existingRequest) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Request already exists',
+        requestId: existingRequest.id,
+        status: existingRequest.status
+      });
+    }
+    const stmt = db.prepare(`
+      INSERT INTO retrieval_requests (unique_card_id, is_priority, payment_method, status, requested_at)
+      VALUES (?, ?, 'pay_at_counter', 'pending', datetime('now'))
+    `);
+    
+    const result = stmt.run(unique_card_id, is_priority ? 1 : 0);
+    
+    console.log('✅ Request created:', result.lastInsertRowid);
+
+    res.json({
+      success: true,
+      message: 'Retrieval request created',
+      requestId: result.lastInsertRowid,
+      vehicle: vehicle
+    });
+  } catch (error) {
+    console.error('❌ Error creating request:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get retrieval queue
+router.get('/queue', (req, res) => {
+  const db = req.app.get('db');
+  try {
+    const requests = db.prepare(`
+      SELECT 
+        r.*,
+        v.license_plate,
+        v.make,
+        v.model,
+        v.color,
+        v.hook_number
+      FROM retrieval_requests r
+      JOIN vehicles v ON r.unique_card_id = v.unique_card_id
+      WHERE r.status IN ('pending', 'assigned')
+      ORDER BY r.is_priority DESC, r.requested_at ASC
+    `).all();
+
+    console.log('📋 Queue endpoint called - returning', requests.length, 'requests');
+    res.json({ success: true, queue: requests });
+  } catch (error) {
+    console.error('Error getting queue:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+
+});
+// Accept retrieval request
+
+// Get pending handover requests (cars ready but waiting for customer)
+router.get('/pending-handovers', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const requests = db.prepare(`
+      SELECT 
+        r.*,
+        v.license_plate, v.make, v.model, v.color, v.hook_number,
+        d.fullName as driver_name
+      FROM retrieval_requests r
+      JOIN vehicles v ON r.unique_card_id = v.unique_card_id
+      LEFT JOIN drivers d ON r.assigned_driver_id = d.id
+      WHERE r.status = 'retrieving'
+      ORDER BY r.requested_at ASC
+    `).all();
+    
+    res.json({ success: true, requests });
+  } catch (error) {
+    console.error('Error fetching pending handovers:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+router.post('/queue/:id/accept', (req, res) => {
+  const db = req.app.get('db');
+  const io = req.app.get('io');
+  const { id } = req.params;
+  const { driverId } = req.body;
+
+  try {
+    console.log('📋 Accept task request:', { taskId: id, driverId });
+    // Update request to assigned status
+    db.prepare(`
+      UPDATE retrieval_requests 
+      SET status = 'assigned', assigned_driver_id = ? 
+      WHERE id = ?
+    `).run(driverId, id);
+
+    // Get the updated request
+    const request = db.prepare(`
+      SELECT r.*, v.license_plate, v.make, v.model, v.color, v.hook_number
+      FROM retrieval_requests r
+      JOIN vehicles v ON r.unique_card_id = v.unique_card_id
+      WHERE r.id = ?
+    `).get(id);
+
+    // Emit socket update
+    io.emit('requestAssigned', { requestId: id, driverId });
+
+    res.json({ success: true, request });
+  } catch (error) {
+    console.error('Error accepting task:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// Complete retrieval - update vehicle and request status
+router.post('/complete-retrieval', (req, res) => {
+  const db = req.app.get('db');
+  const hookManager = req.app.get('hookManager');
+  
+  try {
+    const { requestId, cardId, driverId } = req.body;
+    
+    console.log('📦 Completing retrieval:', { requestId, cardId, driverId });
+
+    // Update vehicle status to 'retrieved'
+    const vehicleStmt = db.prepare(`
+      UPDATE vehicles 
+      SET status = 'retrieved', 
+          check_out_time = datetime('now')
+      WHERE unique_card_id = ?
+    `);
+    vehicleStmt.run(cardId);
+    
+    // Get the vehicle's hook number to release it
+    const vehicle = db.prepare('SELECT key_slot FROM vehicles WHERE unique_card_id = ?').get(cardId);
+    
+    // Release the hook
+    if (vehicle && vehicle.key_slot) {
+      hookManager.releaseHook(vehicle.key_slot);
+      console.log(`✅ Hook ${vehicle.key_slot} released`);
+    }
+
+    // Update request status to 'completed'
+    const requestStmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET status = 'completed',
+          assigned_driver_id = ?,
+          completed_at = datetime('now')
+      WHERE id = ?
+    `);
+    requestStmt.run(driverId, requestId);
+
+    // Get the vehicle's hook number
+    const vehicleHook = db.prepare(`
+      SELECT v.hook_number 
+      FROM vehicles v
+      JOIN retrieval_requests r ON v.unique_card_id = r.unique_card_id
+      WHERE r.id = ?
+    `).get(requestId);
+
+    // Free up the hook
+    if (vehicle && vehicleHook.hook_number) {
+      db.prepare(`UPDATE hooks SET status = 'available' WHERE hook_number = ?`).run(vehicle.hook_number);
+      console.log(`✅ Hook ${vehicle.hook_number} freed`);
+    }
+
+    // Update vehicle status to retrieved
+    db.prepare(`UPDATE vehicles SET status = 'retrieved' WHERE unique_card_id = (SELECT unique_card_id FROM retrieval_requests WHERE id = ?)`).run(requestId);
+    
+    console.log('✅ Retrieval completed successfully');
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('retrievalCompleted', { requestId, cardId });
+      io.emit('statsUpdated', {});
+    }
+
+    res.json({
+      success: true,
+      message: 'Retrieval completed successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error completing retrieval:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ============================================
+// STATION DASHBOARD ENDPOINTS
+// ============================================
+
+// Get station overview - current status
+router.get('/station/overview', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const totalParked = db.prepare(
+      "SELECT COUNT(*) as count FROM vehicles WHERE status = 'parked'"
+    ).get().count;
+    
+    const totalRetrieving = db.prepare(
+      "SELECT COUNT(*) as count FROM retrieval_requests WHERE status = 'pending'"
+    ).get().count;
+    
+    const availableDrivers = db.prepare(
+      "SELECT COUNT(*) as count FROM drivers WHERE status = 'available'"
+    ).get().count || 0;
+    
+    const busyDrivers = db.prepare(
+      "SELECT COUNT(*) as count FROM drivers WHERE status = 'busy'"
+    ).get().count || 0;
+    
+    res.json({
+      success: true,
+      stats: { totalParked, totalRetrieving, availableDrivers, busyDrivers }
+    });
+  } catch (error) {
+    console.error('Error getting station overview:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get daily stats
+router.get('/station/daily-stats', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const totalDropOffs = db.prepare(`
+      SELECT COUNT(*) as count FROM vehicles 
+      WHERE DATE(check_in_time) = DATE('now')
+    `).get().count;
+    
+    const totalPickups = db.prepare(`
+      SELECT COUNT(*) as count FROM retrieval_requests 
+      WHERE DATE(completed_at) = DATE('now') AND completed_at IS NOT NULL
+    `).get().count;
+    
+    const waitTimeData = db.prepare(`
+      SELECT AVG((JULIANDAY(completed_at) - JULIANDAY(requested_at)) * 24 * 60) as avg_wait
+      FROM retrieval_requests 
+      WHERE DATE(completed_at) = DATE('now') AND completed_at IS NOT NULL
+    `).get();
+    
+    const revenueData = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM retrieval_requests 
+      WHERE DATE(completed_at) = DATE('now') AND completed_at IS NOT NULL AND payment_processed = 1
+    `).get();
+    
+    res.json({
+      success: true,
+      stats: {
+        totalDropOffs,
+        totalPickups,
+        averageWaitTime: Math.round(waitTimeData.avg_wait || 0),
+        revenue: revenueData.total || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error getting daily stats:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ============================================
+// PREMIUM WORKFLOW ENDPOINTS
+// ============================================
+
+// Mark car as ready (driver pressed "Got the Car")
+router.post('/retrieval/:id/car-ready', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { driverId } = req.body;
+
+  try {
+    const stmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET status = 'retrieving'
+      WHERE id = ?
+    `);
+    stmt.run(id);
+
+    // Get request details
+    const request = db.prepare('SELECT * FROM retrieval_requests WHERE id = ?').get(id);
+
+    // Emit socket event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('carReady', { 
+        requestId: id, 
+        cardId: request.unique_card_id,
+        timestamp: new Date().toISOString()
+      });
+      console.log('📡 Car ready notification sent');
+    }
+
+    res.json({
+      success: true,
+      message: 'Car marked as ready',
+      request
+    });
+  } catch (error) {
+    console.error('Error marking car ready:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Collect cash payment (station attendant)
+router.post('/retrieval/:id/collect-cash', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { collectedBy, amount, tipAmount } = req.body;
+
+  try {
+    const stmt = db.prepare(`
+      UPDATE retrieval_requests
+      SET amount = ?,
+      SET payment_status = 'cash_collected',
+          amount = ?,
+          tip_amount = ?,
+          payment_collected_by = ?,
+          payment_processed = 1
+      WHERE id = ?
+    `);
+    stmt.run(amount, tipAmount || 0, collectedBy, id);
+
+    // Emit socket event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('cashCollected', { 
+        requestId: id, 
+        collectedBy,
+        amount: parseFloat(amount) + parseFloat(tipAmount || 0)
+      });
+      console.log('📡 Cash collected notification sent');
+    }
+
+    res.json({
+      success: true,
+      message: 'Cash payment collected'
+    });
+  } catch (error) {
+    console.error('Error collecting cash:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Hand over keys (final step)
+router.post('/retrieval/:id/handover-keys', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { handedBy } = req.body;
+
+  try {
+    const stmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET status = 'completed',
+          status = 'completed',
+          completed_at = datetime('now')
+      WHERE id = ?
+    `);
+    stmt.run(id);
+
+    // Get request details for vehicle update
+    const request = db.prepare('SELECT * FROM retrieval_requests WHERE id = ?').get(id);
+    
+    // Update vehicle status
+    db.prepare(`
+      UPDATE vehicles 
+      SET status = 'retrieved',
+          check_out_time = datetime('now')
+      WHERE unique_card_id = ?
+    `).run(request.unique_card_id);
+
+    // Free up the hook
+    const vehicle = db.prepare("SELECT hook_number FROM vehicles WHERE unique_card_id = ?").get(request.unique_card_id);
+    if (vehicle && vehicle.hook_number) {
+      db.prepare("UPDATE hooks SET status = 'available' WHERE hook_number = ?").run(vehicle.hook_number);
+      console.log(`✅ Hook ${vehicle.hook_number} freed after handover`);
+    }
+
+    // Emit socket event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('keysHanded', { 
+        requestId: id,
+        cardId: request.unique_card_id,
+        timestamp: new Date().toISOString()
+      });
+      io.emit('statsUpdated', {});
+      console.log('📡 Keys handed notification sent');
+    }
+
+    res.json({
+      success: true,
+      message: 'Keys handed over, transaction completed'
+    });
+  } catch (error) {
+    console.error('Error handing over keys:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get cash pending requests (for station cash tab)
+router.get('/station/cash-pending', (req, res) => {
+  const db = req.app.get('db');
+
+  try {
+    const requests = db.prepare(`
+      SELECT 
+        rr.*,
+        v.make, v.model, v.color, v.license_plate, v.hook_number,
+        d.fullName as driver_name
+      FROM retrieval_requests rr
+      JOIN vehicles v ON rr.unique_card_id = v.unique_card_id
+      LEFT JOIN drivers d ON rr.assigned_driver_id = d.id
+      WHERE rr.payment_status = 'cash_pending'
+        AND rr.completed_at IS NOT NULL
+        AND rr.status != 'completed'
+      ORDER BY rr.completed_at ASC
+    `).all();
+
+    res.json({
+      success: true,
+      requests
+    });
+  } catch (error) {
+    console.error('Error getting cash pending requests:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Update request to set payment method
+router.post('/retrieval/:id/payment-method', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { paymentMethod } = req.body;
+
+  try {
+    const paymentProcessed = paymentMethod === 'online' ? 1 : 0;
+    
+    const stmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET payment_method = ?,
+          payment_processed = ?
+      WHERE id = ?
+    `);
+    stmt.run(paymentMethod, paymentProcessed, id);
+
+    res.json({
+      success: true,
+      message: 'Payment method updated',
+      paymentMethod
+    });
+  } catch (error) {
+    console.error('Error updating payment method:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ============================================
+// PRICING MANAGEMENT ENDPOINTS
+// ============================================
+
+// Get current pricing
+router.get('/pricing', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const pricing = db.prepare('SELECT * FROM pricing_settings ORDER BY id DESC LIMIT 1').get();
+    
+    if (!pricing) {
+      return res.json({
+        success: true,
+        pricing: {
+          base_valet_fee: 15.00,
+          surge_multiplier: 1.0,
+          is_surge_active: 0,
+          current_price: 15.00
+        }
+      });
+    }
+
+    const currentPrice = pricing.base_valet_fee * (pricing.is_surge_active ? pricing.surge_multiplier : 1.0);
+    
+    res.json({
+      success: true,
+      pricing: {
+        ...pricing,
+        current_price: parseFloat(currentPrice.toFixed(2))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting pricing:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Update pricing
+router.post('/pricing/update', (req, res) => {
+  const db = req.app.get('db');
+  const { base_valet_fee, surge_multiplier, is_surge_active, updated_by } = req.body;
+  
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO pricing_settings (base_valet_fee, surge_multiplier, is_surge_active, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `);
+    
+    stmt.run(
+      base_valet_fee || 15.00,
+      surge_multiplier || 1.0,
+      is_surge_active ? 1 : 0,
+      updated_by || 'Station'
+    );
+
+    const currentPrice = base_valet_fee * (is_surge_active ? surge_multiplier : 1.0);
+
+    // Emit pricing update via WebSocket
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('pricingUpdated', {
+        base_valet_fee,
+        surge_multiplier,
+        is_surge_active,
+        current_price: parseFloat(currentPrice.toFixed(2))
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Pricing updated successfully',
+      current_price: parseFloat(currentPrice.toFixed(2))
+    });
+  } catch (error) {
+    console.error('Error updating pricing:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ============================================
+// DRIVER STATUS ENDPOINTS
+// ============================================
+
+// Update driver status (online/offline)
+router.post('/driver/:id/status', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { status } = req.body; // 'available', 'busy', 'offline'
+
+  try {
+    const stmt = db.prepare('UPDATE drivers SET status = ? WHERE id = ?');
+    stmt.run(status, id);
+
+    // Emit status change via WebSocket
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('driverStatusChanged', { driverId: id, status });
+      console.log(`📡 Driver ${id} status changed to ${status}`);
+    }
+
+    res.json({
+      success: true,
+      message: `Driver status updated to ${status}`
+    });
+  } catch (error) {
+    console.error('Error updating driver status:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Driver logout
+router.post('/driver/logout', (req, res) => {
+  const db = req.app.get('db');
+  const { driverId } = req.body;
+
+  try {
+    if (driverId) {
+      const stmt = db.prepare('UPDATE drivers SET status = ? WHERE id = ?');
+      stmt.run('offline', driverId);
+
+      // Emit status change
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('driverStatusChanged', { driverId, status: 'offline' });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// Get next available hook
+router.get('/hooks/next', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const nextHook = db.prepare(`
+      SELECT hook_number 
+      FROM hooks 
+      WHERE status = 'available' 
+      ORDER BY hook_number 
+      LIMIT 1
+    `).get();
+    
+    if (nextHook) {
+      res.json({ 
+        success: true, 
+        hookNumber: nextHook.hook_number 
+      });
+    } else {
+      res.status(404).json({ 
+        success: false, 
+        message: 'No available hooks' 
+      });
+    }
+  } catch (error) {
+    console.error('Error getting next hook:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// Get all vehicles
+router.get('/vehicles', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const vehicles = db.prepare(`
+      SELECT * FROM vehicles 
+      ORDER BY check_in_time DESC
+    `).all();
+    
+    res.json({ success: true, vehicles });
+  } catch (error) {
+    console.error('Error fetching vehicles:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get retrieval requests
+router.get('/retrieval-requests', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const requests = db.prepare(`
+      SELECT * FROM retrieval_requests 
+      ORDER BY created_at DESC
+    `).all();
+    
+    res.json({ success: true, requests });
+  } catch (error) {
+    console.error('Error fetching retrieval requests:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get single retrieval request by card ID
+router.get('/retrieval-request/:cardId', (req, res) => {
+  const db = req.app.get('db');
+  const { cardId } = req.params;
+  
+  try {
+    const request = db.prepare(`
+      SELECT 
+        r.*,
+        v.license_plate, v.make, v.model, v.color, v.hook_number,
+        d.fullName as driver_name
+      FROM retrieval_requests r
+      LEFT JOIN vehicles v ON r.unique_card_id = v.unique_card_id
+      LEFT JOIN drivers d ON r.assigned_driver_id = d.id
+      WHERE r.unique_card_id = ?
+      ORDER BY r.requested_at DESC
+      LIMIT 1
+    `).get(cardId);
+    
+    if (request) {
+      res.json({ success: true, request });
+    } else {
+      res.json({ success: false, message: 'No request found' });
+    }
+  } catch (error) {
+    console.error('Error fetching request:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Station analytics with date range support
+router.get('/station/analytics', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const { startDate, endDate } = req.query;
+    
+    let dateFilter = '';
+    let dateFilterRetrievals = '';
+    
+    if (startDate && endDate) {
+      // Custom date range
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      
+      dateFilter = `WHERE DATE(check_in_time) >= DATE('${start.toISOString()}') AND DATE(check_in_time) <= DATE('${end.toISOString()}')`;
+      dateFilterRetrievals = `WHERE DATE(completed_at) >= DATE('${start.toISOString()}') AND DATE(completed_at) <= DATE('${end.toISOString()}')`;
+    } else {
+      // Default to today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString().split('T')[0];
+      
+      dateFilter = `WHERE DATE(check_in_time) = '${todayISO}'`;
+      dateFilterRetrievals = `WHERE DATE(completed_at) = '${todayISO}'`;
+    }
+    
+    // Total vehicles parked in date range
+    const totalCheckIns = db.prepare(`
+      SELECT COUNT(*) as count FROM vehicles ${dateFilter}
+    `).get();
+    
+    // Total vehicles retrieved (completed) in date range
+    const totalRetrievals = db.prepare(`
+      SELECT COUNT(*) as count FROM retrieval_requests 
+      WHERE status = 'completed' ${dateFilterRetrievals.replace('WHERE', 'AND')}
+    `).get();
+    
+    // Active drivers currently online
+    const activeDrivers = db.prepare(`
+      SELECT COUNT(*) as count FROM drivers WHERE status = 'online'
+    `).get();
+    
+    // Calculate revenue from completed retrievals
+    const pricingSettings = db.prepare('SELECT base_valet_fee FROM pricing_settings WHERE id = 1').get();
+    const baseFee = pricingSettings ? pricingSettings.base_valet_fee : 15.00;
+    
+    const revenueData = db.prepare(`
+      SELECT 
+        COALESCE(SUM(amount), 0) as total_amount,
+        COALESCE(SUM(tip_amount), 0) as total_tips
+      FROM retrieval_requests 
+      WHERE status = 'completed' ${dateFilterRetrievals.replace('WHERE', 'AND')}
+    `).get();
+    
+    const totalRevenue = revenueData.total_amount + revenueData.total_tips;
+    
+    // Calculate average wait time
+    const waitTimeData = db.prepare(`
+      SELECT 
+        AVG(
+          (julianday(completed_at) - julianday(requested_at)) * 24 * 60
+        ) as avg_minutes
+      FROM retrieval_requests 
+      WHERE status = 'completed' 
+      AND requested_at IS NOT NULL 
+      AND completed_at IS NOT NULL
+      ${dateFilterRetrievals.replace('WHERE', 'AND')}
+    `).get();
+    
+    const averageWaitTime = waitTimeData.avg_minutes ? Math.round(waitTimeData.avg_minutes * 10) / 10 : 0;
+    
+    // Completion rate (completed vs total requests)
+    const totalRequests = db.prepare(`
+      SELECT COUNT(*) as count FROM retrieval_requests ${dateFilterRetrievals}
+    `).get();
+    
+    const completionRate = totalRequests.count > 0 
+      ? Math.round((totalRetrievals.count / totalRequests.count) * 100) 
+      : 100;
+    
+    // Peak hours analysis
+    const peakHours = [];
+    const timeRanges = [
+      { start: 6, end: 11, label: 'Morning' },
+      { start: 11, end: 14, label: 'Lunch' },
+      { start: 14, end: 18, label: 'Afternoon' },
+      { start: 18, end: 23, label: 'Evening' }
+    ];
+    
+    timeRanges.forEach(({ start, end, label }) => {
+      const count = db.prepare(`
+        SELECT COUNT(*) as count FROM vehicles 
+        WHERE CAST(strftime('%H', check_in_time) AS INTEGER) >= ? 
+        AND CAST(strftime('%H', check_in_time) AS INTEGER) < ?
+        ${dateFilter ? 'AND ' + dateFilter.substring(6) : ''}
+      `).get(start, end);
+      
+      const total = totalCheckIns.count || 1;
+      const percentage = Math.round((count.count / total) * 100);
+      
+      peakHours.push({ period: label, percentage: percentage });
+    });
+    
+    res.json({
+      success: true,
+      stats: {
+        totalCheckIns: totalCheckIns.count || 0,
+        totalRetrievals: totalRetrievals.count || 0,
+        totalRevenue: totalRevenue,
+        averageWaitTime: averageWaitTime,
+        activeDrivers: activeDrivers.count || 0,
+        completionRate: completionRate,
+        peakHours: peakHours
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// Station overview for dashboard
+router.get('/station/overview', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const totalVehicles = db.prepare('SELECT COUNT(*) as count FROM vehicles WHERE status = "parked"').get();
+    const pendingRetrievals = db.prepare('SELECT COUNT(*) as count FROM retrieval_requests WHERE status = "pending"').get();
+    const activeDrivers = db.prepare('SELECT COUNT(*) as count FROM drivers WHERE status IN ("available", "busy")').get();
+    const availableHooks = db.prepare('SELECT COUNT(*) as count FROM hooks WHERE status = "available"').get();
+    
+    const pricingSettings = db.prepare('SELECT base_valet_fee FROM pricing_settings WHERE id = 1').get();
+    const baseFee = pricingSettings ? pricingSettings.base_valet_fee : 15.00;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayRevenue = db.prepare(`
+      SELECT COUNT(*) as count FROM retrieval_requests 
+      WHERE status = 'completed' AND completed_at >= ?
+    `).get(today.toISOString());
+    
+    res.json({
+      success: true,
+      overview: {
+        totalVehicles: totalVehicles.count,
+        pendingRetrievals: pendingRetrievals.count,
+        activeDrivers: activeDrivers.count,
+        availableHooks: availableHooks.count,
+        todayRevenue: todayRevenue.count * baseFee
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching overview:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Walk-in NFC Scan - Look up vehicle by card ID
+router.post('/walk-in-nfc-scan', (req, res) => {
+  const db = req.app.get('db');
+  const { cardId } = req.body;
+
+  if (!cardId) {
+    return res.status(400).json({ success: false, message: 'Card ID required' });
+  }
+
+  try {
+    const vehicle = db.prepare(`
+      SELECT * FROM vehicles 
+      WHERE unique_card_id = ? AND status = 'parked'
+    `).get(cardId);
+
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: 'Vehicle not found or already retrieved' });
+    }
+
+    res.json({ success: true, vehicle });
+  } catch (error) {
+    console.error('Walk-in NFC scan error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Lost Card Recovery - Search by license plate or phone
+router.post('/lost-card-recovery', (req, res) => {
+  const db = req.app.get('db');
+  const { licensePlate, phone } = req.body;
+
+  if (!licensePlate && !phone) {
+    return res.status(400).json({ success: false, message: 'License plate or phone number required' });
+  }
+
+  try {
+    let vehicle;
+    if (licensePlate) {
+      vehicle = db.prepare(`
+        SELECT * FROM vehicles 
+        WHERE license_plate = ? AND status = 'parked'
+      `).get(licensePlate.toUpperCase());
+    } else {
+      vehicle = db.prepare(`
+        SELECT * FROM vehicles 
+        WHERE customer_phone = ? AND status = 'parked'
+      `).get(phone);
+    }
+
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: 'Vehicle not found or already retrieved' });
+    }
+
+    res.json({ success: true, vehicle });
+  } catch (error) {
+    console.error('Lost card recovery error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+module.exports = router;

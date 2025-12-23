@@ -1,0 +1,201 @@
+const express = require('express');
+const router = express.Router();
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const dbPath = path.join(__dirname, '..', 'valet.db');
+const db = new Database(dbPath);
+
+// Health check
+router.get('/health', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get statistics
+router.get('/stats', (req, res) => {
+  try {
+    const parkedCount = db.prepare('SELECT COUNT(*) as count FROM vehicles WHERE status = ?').get('parked');
+    const totalCount = db.prepare('SELECT COUNT(*) as count FROM vehicles').get();
+    
+    res.json({
+      success: true,
+      parked: parkedCount.count,
+      total: totalCount.count
+    });
+  } catch (error) {
+    console.error('Error getting stats:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Check-in vehicle
+router.post('/checkin', (req, res) => {
+  const hookManager = req.app.get('hookManager');
+  const db = req.app.get('db');
+  
+  try {
+    const { unique_card_id, license_plate, make, model, color, year, parking_spot, key_slot } = req.body;
+    
+    console.log('✅ Check-in request:', { unique_card_id, license_plate, make, model, key_slot });
+
+    const stmt = db.prepare(`
+      INSERT INTO vehicles (unique_card_id, license_plate, make, model, color, year, parking_spot, key_slot, status, check_in_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parked', datetime('now'))
+    `);
+    
+    const result = stmt.run(unique_card_id, license_plate, make, model, color, year, parking_spot, key_slot);
+    const vehicleId = result.lastInsertRowid;
+    
+    // Assign the hook as occupied
+    if (key_slot) {
+      hookManager.assignHook(key_slot, vehicleId);
+      console.log(`✅ Hook ${key_slot} assigned to vehicle ${vehicleId}`);
+    }
+    
+    console.log('✅ Vehicle checked in successfully:', vehicleId);
+
+    res.json({
+      success: true,
+      message: 'Vehicle checked in successfully',
+      vehicleId: vehicleId,
+      vehicle: {
+        id: vehicleId,
+        unique_card_id,
+        license_plate,
+        make,
+        model,
+        color,
+        hook_number: key_slot,
+        status: 'PARKED'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error checking in vehicle:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get all vehicles
+router.get('/vehicles', (req, res) => {
+  try {
+    const vehicles = db.prepare('SELECT * FROM vehicles WHERE status = ? ORDER BY check_in_time DESC').all('parked');
+    res.json({ success: true, vehicles });
+  } catch (error) {
+    console.error('Error getting vehicles:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Request vehicle retrieval
+router.post('/request', (req, res) => {
+  try {
+    const { unique_card_id, is_priority } = req.body;
+    
+    console.log('🚗 Retrieval request:', { unique_card_id, is_priority });
+
+    const vehicle = db.prepare('SELECT * FROM vehicles WHERE unique_card_id = ? AND status = ?').get(unique_card_id, 'parked');
+    
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: 'Vehicle not found or already retrieved' });
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO retrieval_requests (unique_card_id, is_priority, payment_method, status, requested_at)
+      VALUES (?, ?, 'pay_at_counter', 'pending', datetime('now'))
+    `);
+    
+    const result = stmt.run(unique_card_id, is_priority ? 1 : 0);
+    
+    console.log('✅ Request created:', result.lastInsertRowid);
+
+    res.json({
+      success: true,
+      message: 'Retrieval request created',
+      requestId: result.lastInsertRowid,
+      vehicle: vehicle
+    });
+  } catch (error) {
+    console.error('❌ Error creating request:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get retrieval queue
+router.get('/queue', (req, res) => {
+  try {
+    const requests = db.prepare(`
+      SELECT 
+        r.*,
+        v.license_plate,
+        v.make,
+        v.model,
+        v.color,
+        v.key_slot
+      FROM retrieval_requests r
+      JOIN vehicles v ON r.unique_card_id = v.unique_card_id
+      WHERE r.status = 'pending'
+      ORDER BY r.is_priority DESC, r.requested_at ASC
+    `).all();
+
+    res.json({ success: true, requests });
+  } catch (error) {
+    console.error('Error getting queue:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+module.exports = router;
+
+// Complete retrieval - update vehicle and request status
+router.post('/complete-retrieval', (req, res) => {
+  const db = req.app.get('db');
+  const hookManager = req.app.get('hookManager');
+  
+  try {
+    const { requestId, cardId, driverId } = req.body;
+    
+    console.log('📦 Completing retrieval:', { requestId, cardId, driverId });
+
+    // Update vehicle status to 'retrieved'
+    const vehicleStmt = db.prepare(`
+      UPDATE vehicles 
+      SET status = 'retrieved', 
+          check_out_time = datetime('now')
+      WHERE unique_card_id = ?
+    `);
+    vehicleStmt.run(cardId);
+    
+    // Get the vehicle's hook number to release it
+    const vehicle = db.prepare('SELECT key_slot FROM vehicles WHERE unique_card_id = ?').get(cardId);
+    
+    // Release the hook
+    if (vehicle && vehicle.key_slot) {
+      hookManager.releaseHook(vehicle.key_slot);
+      console.log(`✅ Hook ${vehicle.key_slot} released`);
+    }
+
+    // Update request status to 'completed'
+    const requestStmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET status = 'completed',
+          assigned_driver_id = ?,
+          completed_at = datetime('now')
+      WHERE id = ?
+    `);
+    requestStmt.run(driverId, requestId);
+    
+    console.log('✅ Retrieval completed successfully');
+
+    res.json({
+      success: true,
+      message: 'Retrieval completed successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error completing retrieval:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});

@@ -1,0 +1,42 @@
+Find this section in api.js:
+
+router.post('/retrieval/:id/car-ready', (req, res) => {
+
+And update it to:
+
+router.post('/retrieval/:id/car-ready', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { driverId } = req.body;
+
+  try {
+    const stmt = db.prepare(`
+      UPDATE retrieval_requests 
+      SET car_ready_at = datetime('now'),
+          status = 'in_progress'
+      WHERE id = ?
+    `);
+    stmt.run(id);
+
+    const request = db.prepare('SELECT * FROM retrieval_requests WHERE id = ?').get(id);
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('carReady', { 
+        requestId: id, 
+        cardId: request.unique_card_id,
+        timestamp: new Date().toISOString()
+      });
+      io.emit('statsUpdated', {});
+    }
+
+    res.json({
+      success: true,
+      message: 'Car marked as ready',
+      request
+    });
+  } catch (error) {
+    console.error('Error marking car ready:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});

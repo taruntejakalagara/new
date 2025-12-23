@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Valet Driver</string>
+    <string name="title_activity_main">Valet Driver</string>
+    <string name="package_name">com.valet.driver</string>
+    <string name="custom_url_scheme">com.valet.driver</string>
+</resources>

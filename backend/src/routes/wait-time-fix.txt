@@ -1,0 +1,11 @@
+Find this line in api.js:
+
+SELECT AVG((JULIANDAY(completed_at) - JULIANDAY(requested_at)) * 24 * 60) as avg_wait
+FROM retrieval_requests
+WHERE DATE(completed_at) = DATE('now') AND status = 'completed'
+
+Replace with:
+
+SELECT AVG((JULIANDAY(car_ready_at) - JULIANDAY(requested_at)) * 24 * 60) as avg_wait
+FROM retrieval_requests
+WHERE DATE(car_ready_at) = DATE('now') AND car_ready_at IS NOT NULL

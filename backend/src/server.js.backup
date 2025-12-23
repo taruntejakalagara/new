@@ -1,0 +1,73 @@
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+
+// Load environment variables if .env exists
+try {
+  require('dotenv').config();
+} catch (err) {
+  console.log('No .env file found, using defaults');
+}
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Initialize database
+const Database = require('better-sqlite3');
+const dbPath = path.join(__dirname, 'valet.db');
+const db = new Database(dbPath);
+app.set('db', db);
+
+// Initialize Hook Manager
+const HookManager = require('./config/hooks');
+const hookManager = new HookManager(db);
+app.set('hookManager', hookManager);
+
+// Import routes
+const apiRoutes = require('./routes/api');
+app.use('/api', apiRoutes);
+const driversRoutes = require('./routes/drivers');
+app.use('/api/drivers', driversRoutes);
+const hooksRoutes = require('./routes/hooks');
+app.use('/api/hooks', hooksRoutes);
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Paperless Valet API',
+    version: '1.0.0',
+    status: 'running'
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log('\n🚀 Paperless Valet API');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('✓ Database connected');
+  console.log('✓ Schema initialized');
+  console.log(`✓ Server running on port ${PORT}`);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  console.log('API Endpoints:');
+  console.log(`  Health:    GET  http://localhost:${PORT}/api/health`);
+  console.log(`  Check-in:  POST http://localhost:${PORT}/api/checkin`);
+  console.log(`  Vehicles:  GET  http://localhost:${PORT}/api/vehicles`);
+  console.log(`  Request:   POST http://localhost:${PORT}/api/request`);
+  console.log(`  Queue:     GET  http://localhost:${PORT}/api/queue`);
+  console.log(`  Stats:     GET  http://localhost:${PORT}/api/stats`);
+  console.log('\n✓ Ready!\n');
+});
+
+// Error handling
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
+});

@@ -1,0 +1,94 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:5173", "http://localhost:5174"],
+    methods: ["GET", "POST"]
+  }
+});
+
+// --- DATABASE ---
+let drivers = [
+  { id: 101, username: 'driver1', password: '123', fullName: 'John Doe', phone: '555-0101', status: 'available' },
+  { id: 102, username: 'driver2', password: '123', fullName: 'Sarah Smith', phone: '555-0102', status: 'busy' }
+];
+let requests = [];
+let vehicleDrafts = {};
+let pricing = { base_valet_fee: 15.00, surge_multiplier: 1.0, is_surge_active: false };
+let globalSequenceCounter = 1;
+
+// --- SOCKETS ---
+io.on('connection', (socket) => {
+  console.log('⚡ Client connected:', socket.id);
+  socket.emit('pricingUpdated', pricing);
+  socket.emit('statsUpdated', calculateStats());
+});
+
+// --- ENDPOINTS ---
+app.post('/api/drivers/login', (req, res) => {
+  const { username, password } = req.body;
+  const driver = drivers.find(d => d.username === username && d.password === password);
+  driver ? res.json({ success: true, driver }) : res.status(401).json({ success: false });
+});
+
+app.get('/api/driver/:id/dashboard', (req, res) => {
+  const id = parseInt(req.params.id);
+  const driver = drivers.find(d => d.id === id);
+  if (!driver) return res.json({ success: false });
+  const active = requests.filter(r => r.assigned_driver_id === id && r.status === 'requested').length;
+  const parked = requests.filter(r => r.parkedByDriverId == id).length;
+  const retrieved = requests.filter(r => r.retrievedByDriverId == id).length;
+  res.json({ success: true, status: driver.status, stats: { activeTasks: active, carsParked: parked, carsRetrieved: retrieved } });
+});
+
+app.post('/api/vehicle/draft', (req, res) => {
+  vehicleDrafts[req.body.cardId] = req.body;
+  res.json({ success: true });
+});
+
+app.post('/api/vehicle/draft/location', (req, res) => {
+  const { cardId, zone, spotNumber } = req.body;
+  if(vehicleDrafts[cardId]) vehicleDrafts[cardId].location = `${zone}-${spotNumber}`;
+  res.json({ success: true });
+});
+
+app.post('/api/vehicle/check-in/complete', (req, res) => {
+  const { cardId, hookNumber, driverId } = req.body;
+  const draft = vehicleDrafts[cardId] || {};
+  
+  requests.push({
+    id: Date.now(),
+    ticketId: `TKT-${Date.now().toString().substr(-4)}`,
+    cardId, hookNumber, parkedByDriverId: parseInt(driverId),
+    status: 'parked', checkInTime: new Date(), isPriority: false,
+    licensePlate: draft.licensePlate || 'UNK', make: draft.make, model: draft.model,
+    color: draft.color, location: draft.location
+  });
+  globalSequenceCounter++;
+  io.emit('newTicket');
+  io.emit('driverUpdated');
+  res.json({ success: true });
+});
+
+app.get('/api/driver/tasks/:id', (req, res) => {
+  const tasks = requests.filter(r => r.status === 'requested');
+  res.json({ success: true, tasks });
+});
+
+// Helper
+function calculateStats() {
+  return { 
+    totalCheckIns: requests.length, 
+    activeDrivers: drivers.filter(d => d.status !== 'break').length 
+  };
+}
+
+server.listen(4000, () => console.log('🚀 Backend running on 4000'));

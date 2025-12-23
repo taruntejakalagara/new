@@ -1,0 +1,56 @@
+router.post('/checkin', (req, res) => {
+  const db = req.app.get('db');
+  const io = req.app.get('io');
+  
+  try {
+    const { cardId, licensePlate, make, model, color, phone, hookNumber } = req.body;
+    
+    console.log('✅ Check-in request:', { cardId, licensePlate, hookNumber });
+
+    // Get sequence number
+    const lastVehicle = db.prepare('SELECT MAX(sequence_number) as max FROM vehicles').get();
+    const sequenceNumber = (lastVehicle.max || 0) + 1;
+
+    // Insert vehicle
+    const stmt = db.prepare(`
+      INSERT INTO vehicles 
+      (unique_card_id, sequence_number, license_plate, make, model, color, customer_phone, hook_number, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parked')
+    `);
+    
+    const result = stmt.run(
+      cardId, 
+      sequenceNumber,
+      licensePlate || 'PENDING', 
+      make || 'Unknown', 
+      model || 'Unknown', 
+      color || 'Unknown', 
+      phone || '', 
+      hookNumber
+    );
+    
+    const vehicleId = result.lastInsertRowid;
+    
+    // Mark hook as occupied
+    db.prepare('UPDATE hooks SET is_occupied = 1 WHERE hook_number = ?').run(hookNumber);
+    
+    console.log(`✅ Vehicle ${vehicleId} checked in at hook ${hookNumber}`);
+    
+    // Emit socket update
+    io.emit('vehicleCheckedIn', { vehicleId, hookNumber });
+    
+    res.json({ 
+      success: true, 
+      vehicleId,
+      sequenceNumber,
+      hookNumber
+    });
+    
+  } catch (error) {
+    console.error('❌ Check-in error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});

@@ -1,0 +1,7 @@
+    const stats = db.prepare(`
+      SELECT 
+        COUNT(CASE WHEN DATE(r.requested_at) = ? AND r.status = 'completed' THEN 1 END) as completedToday,
+        COUNT(CASE WHEN r.status IN ('pending', 'assigned') THEN 1 END) as activeTasks,
+        0 as earnings
+      FROM retrieval_requests r
+    `).get(today, id);

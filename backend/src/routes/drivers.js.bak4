@@ -1,0 +1,419 @@
+const express = require('express');
+const router = express.Router();
+const crypto = require('crypto');
+
+// Simple password hashing (in production, use bcrypt)
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// Driver Registration (from Station Dashboard)
+router.post('/register', (req, res) => {
+  const db = req.app.get('db');
+  const { 
+    fullName, 
+    username, 
+    password, 
+    phone, 
+    email, 
+    licenseNumber,
+    vehicleInfo,
+    emergencyContact,
+    emergencyPhone
+  } = req.body;
+
+  // Validation
+  if (!fullName || !username || !password || !phone) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Full name, username, password, and phone are required' 
+    });
+  }
+
+  try {
+    // Check if username already exists
+    const existingUser = db.prepare('SELECT id FROM drivers WHERE username = ?').get(username);
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username already exists' 
+      });
+    }
+
+    // Check if phone already exists
+    const existingPhone = db.prepare('SELECT id FROM drivers WHERE phone = ?').get(phone);
+    if (existingPhone) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Phone number already registered' 
+      });
+    }
+
+    // Hash password
+    const hashedPassword = hashPassword(password);
+
+    // Insert new driver
+    const stmt = db.prepare(`
+      INSERT INTO drivers (
+        fullName, username, password, phone, email, 
+        licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
+        status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      fullName,
+      username,
+      hashedPassword,
+      phone,
+      email || null,
+      licenseNumber || null,
+      vehicleInfo || null,
+      emergencyContact || null,
+      emergencyPhone || null,
+      'active',
+      new Date().toISOString()
+    );
+
+    res.json({
+      success: true,
+      message: 'Driver registered successfully',
+      driver: {
+        id: result.lastInsertRowid,
+        fullName,
+        username,
+        phone,
+        email,
+        status: 'active'
+      }
+    });
+
+  } catch (error) {
+    console.error('Driver registration error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to register driver',
+      error: error.message 
+    });
+  }
+});
+
+// Driver Login (from Driver App)
+router.post('/login', (req, res) => {
+  const db = req.app.get('db');
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Username and password are required' 
+    });
+  }
+
+  try {
+    const hashedPassword = hashPassword(password);
+    
+    const driver = db.prepare(`
+      SELECT id, fullName, username, phone, email, status, licenseNumber, vehicleInfo
+      FROM drivers 
+      WHERE username = ? AND password = ?
+    `).get(username, hashedPassword);
+
+    if (!driver) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid username or password' 
+      });
+    }
+
+    if (driver.status !== 'active') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Your account is inactive. Please contact the station manager.' 
+      });
+    }
+
+    // Update last login
+    db.prepare('UPDATE drivers SET last_login = ? WHERE id = ?')
+      .run(new Date().toISOString(), driver.id);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      driver: {
+        id: driver.id,
+        fullName: driver.fullName,
+        username: driver.username,
+        phone: driver.phone,
+        email: driver.email,
+        status: driver.status,
+        licenseNumber: driver.licenseNumber,
+        vehicleInfo: driver.vehicleInfo
+      }
+    });
+
+  } catch (error) {
+    console.error('Driver login error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Login failed',
+      error: error.message 
+    });
+  }
+});
+
+// Get all drivers (for Station Dashboard)
+router.get('/', (req, res) => {
+  const db = req.app.get('db');
+  
+  try {
+    const drivers = db.prepare(`
+      SELECT id, fullName, username, phone, email, status, 
+             licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
+             created_at, last_login
+      FROM drivers 
+      ORDER BY created_at DESC
+    `).all();
+
+    res.json({
+      success: true,
+      drivers
+    });
+  } catch (error) {
+    console.error('Get drivers error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch drivers',
+      error: error.message 
+    });
+  }
+});
+
+// Get driver by ID
+router.get('/:id', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+
+  try {
+    const driver = db.prepare(`
+      SELECT id, fullName, username, phone, email, status,
+             licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
+             created_at, last_login
+      FROM drivers 
+      WHERE id = ?
+    `).get(id);
+
+    if (!driver) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Driver not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      driver
+    });
+  } catch (error) {
+    console.error('Get driver error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch driver',
+      error: error.message 
+    });
+  }
+});
+
+// Update driver
+router.put('/:id', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { 
+    fullName, 
+    phone, 
+    email, 
+    licenseNumber,
+    vehicleInfo,
+    emergencyContact,
+    emergencyPhone,
+    status
+  } = req.body;
+
+  try {
+    const stmt = db.prepare(`
+      UPDATE drivers 
+      SET fullName = ?, phone = ?, email = ?, licenseNumber = ?,
+          vehicleInfo = ?, emergencyContact = ?, emergencyPhone = ?, status = ?
+      WHERE id = ?
+    `);
+
+    stmt.run(
+      fullName,
+      phone,
+      email || null,
+      licenseNumber || null,
+      vehicleInfo || null,
+      emergencyContact || null,
+      emergencyPhone || null,
+      status,
+      id
+    );
+
+    res.json({
+      success: true,
+      message: 'Driver updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update driver error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update driver',
+      error: error.message 
+    });
+  }
+});
+
+// Update driver status
+router.put('/:id/status', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+  const { status } = req.body;
+
+  try {
+    db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run(status, id);
+
+    res.json({
+      success: true,
+      message: 'Driver status updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update driver status error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update driver status',
+      error: error.message 
+    });
+  }
+});
+
+// Delete driver
+router.delete('/:id', (req, res) => {
+  const db = req.app.get('db');
+  const { id } = req.params;
+
+  try {
+    db.prepare('DELETE FROM drivers WHERE id = ?').run(id);
+
+    res.json({
+      success: true,
+      message: 'Driver deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete driver error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete driver',
+      error: error.message 
+    });
+  }
+});
+
+module.exports = router;
+
+// Get driver statistics
+// Get driver statistics
+router.get('/:id/stats', (req, res) => {
+  const db = req.app.get('db');
+  const driverId = req.params.id;
+  
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayISO = today.toISOString();
+    
+    // Count vehicles checked in today
+    const todayCount = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM vehicles 
+      WHERE check_in_time >= ?
+    `).get(todayISO);
+    
+    // Count pending retrieval requests
+    const activeTasks = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM retrieval_requests 
+      WHERE status = 'pending'
+    `).get();
+    
+    // Calculate earnings
+    const pricingSettings = db.prepare('SELECT base_valet_fee FROM pricing_settings WHERE id = 1').get();
+    const baseFee = pricingSettings ? pricingSettings.base_valet_fee : 15.00;
+    
+    const completedRetrievals = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM retrieval_requests 
+      WHERE status = 'completed' 
+      AND completed_at >= ?
+    `).get(todayISO);
+    
+    const earnings = (completedRetrievals.count || 0) * baseFee;
+    
+    res.json({
+      success: true,
+      stats: {
+        completedToday: todayCount.count || 0,
+        activeTasks: activeTasks.count || 0,
+        earnings: earnings
+      }
+    });
+  } catch (error) {
+    console.error('Error getting driver stats:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+});
+
+// Update driver status
+router.post('/:id/status', (req, res) => {
+  const db = req.app.get('db');
+  const driverId = req.params.id;
+  const { status } = req.body;
+  
+  try {
+    db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run(status, driverId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating driver status:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Logout driver
+router.post('/logout', (req, res) => {
+  const db = req.app.get('db');
+  const { driverId } = req.body;
+  
+  try {
+    db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run('inactive', driverId);
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+module.exports = router;
+
+// Test route
+router.post('/test-login', (req, res) => {
+  res.json({ success: true, message: 'Test endpoint works', body: req.body });
+});
+
