@@ -22,7 +22,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = async (username, password) => {
-    const response = await fetch(`${API_BASE_URL}/drivers/login`, {
+    const response = await fetch(`${API_BASE_URL}/drivers/login`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),

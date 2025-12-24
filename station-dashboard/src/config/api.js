@@ -1,14 +1,42 @@
 /**
- * API Configuration - SIMPLE VERSION
+ * API Configuration - AUTO-DETECT VERSION
  * 
- * TO CHANGE NETWORK: Just update the IP below and restart apps
- * Or use 'localhost' when running on same machine
+ * This config automatically detects the correct API URL based on:
+ * 1. If backend is on same machine → uses localhost
+ * 2. If on network → uses the hostname from browser URL
+ * 
+ * NO MORE MANUAL IP CHANGES NEEDED!
  */
 
 // ========================================
-// CHANGE THIS IP WHEN YOU SWITCH NETWORKS
+// AUTO-DETECT API HOST
 // ========================================
-const API_HOST = 'valet.local';  // or use your IP like '192.168.12.205'
+function getApiHost() {
+  // If running in browser
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    // If accessing via localhost, use localhost
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'localhost';
+    }
+    
+    // If accessing via valet.local, use valet.local
+    if (hostname === 'valet.local') {
+      return 'valet.local';
+    }
+    
+    // If accessing via IP address, use same IP for API
+    // This means if you access app at 192.168.1.100:5173, 
+    // it will call API at 192.168.1.100:4000
+    return hostname;
+  }
+  
+  // Fallback for SSR or non-browser
+  return 'localhost';
+}
+
+const API_HOST = getApiHost();
 const API_PORT = '4000';
 // ========================================
 
@@ -17,12 +45,15 @@ export const API_BASE_URL = `http://${API_HOST}:${API_PORT}/api`;
 export const WS_URL = `ws://${API_HOST}:${API_PORT}`;
 export const SOCKET_URL = `http://${API_HOST}:${API_PORT}`;
 
+// Log which host we're using (helpful for debugging)
+console.log(`🔗 API Host: ${API_HOST} → ${API_BASE_URL}`);
+
 // App info
 export const APP_VERSION = '1.0.0';
 export const APP_NAME = 'Digital Valet';
 export const APP_AUTHOR = 'The Digital Key';
 
-// Customer app URLs
+// Customer app URLs (use same host detection)
 export const CUSTOMER_URL = `http://${API_HOST}:5174`;
 export const CUSTOMER_BASE_URL = `http://${API_HOST}:5174`;
 
@@ -57,6 +88,10 @@ export const ENDPOINTS = {
   ASSIGN_DRIVER: (id) => `/queue/${id}/assign`,
   CANCEL_REQUEST: (id) => `/queue/${id}/cancel`,
   CUSTOMER_NOTIFIED: (id) => `/queue/${id}/notified`,
+  
+  // Retrieval Request
+  REQUEST: '/request',
+  RETRIEVAL_REQUEST: '/request',
   
   // Hooks
   HOOKS: '/hooks',
@@ -238,9 +273,6 @@ export const apiDelete = async (endpoint) => {
   });
   return response.json();
 };
-
-// Log on load
-console.log(`🔗 API: ${API_BASE_URL}`);
 
 export default {
   API_BASE_URL, WS_URL, SOCKET_URL, CUSTOMER_URL, CUSTOMER_BASE_URL,
