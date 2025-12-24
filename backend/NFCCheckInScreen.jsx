@@ -15,7 +15,7 @@ import NfcManager, { NfcTech, Ndef } from 'react-native-nfc-manager';
 // ⚠️ CHANGE THIS TO YOUR BACKEND IP ADDRESS
 const API_URL = 'http://YOUR_COMPUTER_IP:4000/api';
 // For testing: http://10.0.2.2:4000/api (Android Emulator)
-// Or your actual IP: http://192.168.1.XXX:4000/api
+// Or your actual IP: http://valet.localXXX:4000/api
 
 const NFCCheckInScreen = ({ navigation }) => {
   const [nfcSupported, setNfcSupported] = useState(false);

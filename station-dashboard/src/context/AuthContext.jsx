@@ -7,12 +7,11 @@ export function AuthProvider({ children }) {
   const [manager, setManager] = useState(null);
   const [loading, setLoading] = useState(true);
   const [shiftConfig, setShiftConfig] = useState({
-    tipPolicy: 'individual', // 'individual' or 'pooled'
-    pricingModel: 'flat', // 'flat', 'hourly', 'tiered'
+    tipPolicy: 'individual',
+    pricingModel: 'flat',
   });
 
   useEffect(() => {
-    // Check for stored session
     const stored = localStorage.getItem('station_manager');
     if (stored) {
       try {
@@ -28,7 +27,8 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password, config = {}) => {
     try {
-      const response = await fetch(`${API_BASE_URL}${ENDPOINTS.LOGIN}`, {
+      const url = API_BASE_URL + ENDPOINTS.LOGIN;
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -60,9 +60,26 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Direct login with manager data (used when LoginPage already authenticated)
+  const loginWithManager = (managerData, config = {}) => {
+    const sessionData = {
+      manager: managerData,
+      shiftConfig: {
+        tipPolicy: config.tipPolicy || 'individual',
+        pricingModel: config.pricingModel || 'flat',
+        ...config,
+      },
+    };
+    
+    setManager(managerData);
+    setShiftConfig(sessionData.shiftConfig);
+    localStorage.setItem('station_manager', JSON.stringify(sessionData));
+  };
+
   const logout = async () => {
     try {
-      await fetch(`${API_BASE_URL}${ENDPOINTS.LOGOUT}`, {
+      const url = API_BASE_URL + ENDPOINTS.LOGOUT;
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ managerId: manager?.id }),
@@ -94,6 +111,7 @@ export function AuthProvider({ children }) {
       loading,
       shiftConfig,
       login,
+      loginWithManager,
       logout,
       updateShiftConfig,
     }}>

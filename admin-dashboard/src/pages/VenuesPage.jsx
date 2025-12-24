@@ -1,311 +1,297 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
-  Building2, Plus, Edit2, Trash2, MapPin, Phone,
-  Settings, ChevronRight, Search, Filter
+  Building2, 
+  Plus, 
+  Search, 
+  Edit2, 
+  Trash2, 
+  ChevronRight,
+  MapPin,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
-import { API_BASE_URL } from '../config/api';
-
-function VenueRow({ venue, onEdit, onDelete }) {
-  return (
-    <div className="card card-hover p-4 flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <div 
-          className="w-12 h-12 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: venue.branding?.primaryColor + '20' || '#6366f120' }}
-        >
-          <Building2 size={24} style={{ color: venue.branding?.primaryColor || '#6366f1' }} />
-        </div>
-        <div>
-          <h3 className="font-semibold text-white">{venue.name}</h3>
-          <div className="flex items-center gap-3 mt-1">
-            <span className="text-xs text-slate-500 flex items-center gap-1">
-              <MapPin size={12} />
-              {venue.contact?.address || 'No address'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-6">
-        <div className="text-center">
-          <p className="text-lg font-bold text-white">{venue.settings?.hooksCount || 50}</p>
-          <p className="text-xs text-slate-500">Hooks</p>
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-bold text-emerald-400">${venue.pricing?.baseFee || 15}</p>
-          <p className="text-xs text-slate-500">Base Fee</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => onEdit(venue)}
-            className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-          >
-            <Edit2 size={18} />
-          </button>
-          <button 
-            onClick={() => onDelete(venue)}
-            className="p-2 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={18} />
-          </button>
-          <ChevronRight size={18} className="text-slate-600" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function VenueModal({ venue, isOpen, onClose, onSave }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    shortName: '',
-    slug: '',
-    address: '',
-    phone: '',
-    hooksCount: 50,
-    baseFee: 15,
-    priorityFee: 25,
-    primaryColor: '#C9A962',
-  });
-
-  useEffect(() => {
-    if (venue) {
-      setFormData({
-        name: venue.name || '',
-        shortName: venue.shortName || '',
-        slug: venue.slug || '',
-        address: venue.contact?.address || '',
-        phone: venue.contact?.phone || '',
-        hooksCount: venue.settings?.hooksCount || 50,
-        baseFee: venue.pricing?.baseFee || 15,
-        priorityFee: venue.pricing?.priorityFee || 25,
-        primaryColor: venue.branding?.primaryColor || '#C9A962',
-      });
-    }
-  }, [venue]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-slate-900 rounded-2xl w-full max-w-lg p-6 border border-slate-700">
-        <h2 className="text-xl font-bold text-white mb-6">
-          {venue ? 'Edit Venue' : 'Add New Venue'}
-        </h2>
-
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Venue Name</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                placeholder="Fairmont Pittsburgh"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Short Name</label>
-              <input
-                type="text"
-                value={formData.shortName}
-                onChange={(e) => setFormData({ ...formData, shortName: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                placeholder="Fairmont"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Address</label>
-            <input
-              type="text"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-              placeholder="510 Market St, Pittsburgh, PA"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Phone</label>
-              <input
-                type="text"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                placeholder="+1 412-773-8800"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Number of Hooks</label>
-              <input
-                type="number"
-                value={formData.hooksCount}
-                onChange={(e) => setFormData({ ...formData, hooksCount: parseInt(e.target.value) })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Base Fee ($)</label>
-              <input
-                type="number"
-                value={formData.baseFee}
-                onChange={(e) => setFormData({ ...formData, baseFee: parseInt(e.target.value) })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Priority Fee ($)</label>
-              <input
-                type="number"
-                value={formData.priorityFee}
-                onChange={(e) => setFormData({ ...formData, priorityFee: parseInt(e.target.value) })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Brand Color</label>
-              <input
-                type="color"
-                value={formData.primaryColor}
-                onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                className="w-full h-10 bg-slate-800 border border-slate-700 rounded-lg cursor-pointer"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-6">
-          <button onClick={onClose} className="btn btn-ghost">Cancel</button>
-          <button onClick={() => onSave(formData)} className="btn btn-primary">Save Venue</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+import { API_BASE_URL, getCurrentEST } from '../config/api';
 
 export default function VenuesPage() {
   const [venues, setVenues] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedVenue, setSelectedVenue] = useState(null);
-
-  const fetchVenues = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/venues`);
-      const data = await response.json();
-      if (data.success && data.venues) {
-        setVenues(data.venues);
-      }
-    } catch (error) {
-      console.error('Error fetching venues:', error);
-    }
-  };
+  const [showModal, setShowModal] = useState(false);
+  const [editingVenue, setEditingVenue] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchVenues();
   }, []);
 
-  const handleEdit = (venue) => {
-    setSelectedVenue(venue);
-    setModalOpen(true);
-  };
-
-  const handleDelete = (venue) => {
-    if (confirm(`Are you sure you want to delete ${venue.name}?`)) {
-      // API call to delete
-      setVenues(venues.filter(v => v.id !== venue.id));
+  const fetchVenues = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/venues`);
+      const data = await response.json();
+      
+      if (data.success && data.venues) {
+        setVenues(data.venues);
+      } else {
+        // Demo venues
+        setVenues([
+          { id: 1, name: 'Fairmont Pittsburgh', address: '510 Market St, Pittsburgh, PA', status: 'active' },
+          { id: 2, name: 'The Westin Convention Center', address: '1000 Penn Ave, Pittsburgh, PA', status: 'active' },
+          { id: 3, name: 'Omni William Penn', address: '530 William Penn Pl, Pittsburgh, PA', status: 'inactive' }
+        ]);
+      }
+    } catch (error) {
+      console.error('Error fetching venues:', error);
+      setVenues([
+        { id: 1, name: 'Fairmont Pittsburgh', address: '510 Market St, Pittsburgh, PA', status: 'active' }
+      ]);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSave = (formData) => {
-    // API call to save
-    console.log('Saving venue:', formData);
-    setModalOpen(false);
-    setSelectedVenue(null);
-    fetchVenues();
-  };
-
-  const filteredVenues = venues.filter(v => 
-    v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    v.shortName?.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredVenues = venues.filter(venue =>
+    venue.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    venue.address.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="venues-page">
+      <header className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-white">Venues</h1>
-          <p className="text-slate-500">Manage your hotel properties</p>
+          <h1>Venues</h1>
+          <p>Manage all valet locations</p>
         </div>
-        <button 
-          onClick={() => { setSelectedVenue(null); setModalOpen(true); }}
-          className="btn btn-primary"
-        >
-          <Plus size={20} />
+        <button className="add-btn" onClick={() => setShowModal(true)}>
+          <Plus size={18} />
           Add Venue
         </button>
-      </div>
+      </header>
 
-      {/* Search & Filters */}
-      <div className="flex items-center gap-4">
-        <div className="flex-1 flex items-center gap-3 bg-slate-800/50 rounded-lg px-3 py-2">
-          <Search size={18} className="text-slate-500" />
-          <input 
-            type="text"
-            placeholder="Search venues..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-transparent border-none outline-none text-sm text-slate-300 placeholder-slate-500 w-full"
-          />
-        </div>
-        <button className="btn btn-ghost">
-          <Filter size={18} />
-          Filters
-        </button>
+      {/* Search */}
+      <div className="search-bar">
+        <Search size={18} />
+        <input
+          type="text"
+          placeholder="Search venues..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
       </div>
 
       {/* Venues List */}
-      <div className="space-y-3">
-        {filteredVenues.length > 0 ? (
-          filteredVenues.map((venue, index) => (
-            <VenueRow 
-              key={venue.id || index}
-              venue={venue}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-            />
-          ))
-        ) : (
-          <div className="card p-8 text-center">
-            <Building2 size={48} className="mx-auto text-slate-600 mb-4" />
-            <h3 className="text-lg font-medium text-white mb-2">No venues found</h3>
-            <p className="text-slate-500 mb-4">Get started by adding your first venue</p>
-            <button 
-              onClick={() => setModalOpen(true)}
-              className="btn btn-primary mx-auto"
-            >
-              <Plus size={20} />
-              Add Venue
-            </button>
+      <div className="venues-list">
+        {filteredVenues.map(venue => (
+          <div key={venue.id} className="venue-row">
+            <div className="venue-icon">
+              <Building2 size={20} />
+            </div>
+            <div className="venue-info" onClick={() => navigate(`/venues/${venue.id}`)}>
+              <h3>{venue.name}</h3>
+              <p>
+                <MapPin size={14} />
+                {venue.address}
+              </p>
+            </div>
+            <div className={`status ${venue.status}`}>
+              {venue.status === 'active' ? <CheckCircle size={14} /> : <XCircle size={14} />}
+              {venue.status}
+            </div>
+            <div className="actions">
+              <button className="action-btn" onClick={() => {
+                setEditingVenue(venue);
+                setShowModal(true);
+              }}>
+                <Edit2 size={16} />
+              </button>
+              <button className="action-btn delete">
+                <Trash2 size={16} />
+              </button>
+              <button className="action-btn view" onClick={() => navigate(`/venues/${venue.id}`)}>
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
-        )}
+        ))}
       </div>
 
-      {/* Modal */}
-      <VenueModal
-        venue={selectedVenue}
-        isOpen={modalOpen}
-        onClose={() => { setModalOpen(false); setSelectedVenue(null); }}
-        onSave={handleSave}
-      />
+      <style>{`
+        .venues-page {
+          padding: 2rem;
+        }
+
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 1.5rem;
+        }
+
+        .page-header h1 {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #1e293b;
+        }
+
+        .page-header p {
+          color: #64748b;
+          font-size: 0.875rem;
+        }
+
+        .add-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.625rem 1rem;
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .add-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .search-bar {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          background: white;
+          padding: 0.75rem 1rem;
+          border-radius: 10px;
+          border: 1px solid #e2e8f0;
+          margin-bottom: 1.5rem;
+        }
+
+        .search-bar svg {
+          color: #9ca3af;
+        }
+
+        .search-bar input {
+          flex: 1;
+          border: none;
+          outline: none;
+          font-size: 0.9375rem;
+        }
+
+        .venues-list {
+          background: white;
+          border-radius: 12px;
+          border: 1px solid #e2e8f0;
+          overflow: hidden;
+        }
+
+        .venue-row {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid #f1f5f9;
+          transition: background 0.2s;
+        }
+
+        .venue-row:last-child {
+          border-bottom: none;
+        }
+
+        .venue-row:hover {
+          background: #f8fafc;
+        }
+
+        .venue-icon {
+          width: 42px;
+          height: 42px;
+          background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+        }
+
+        .venue-info {
+          flex: 1;
+          cursor: pointer;
+        }
+
+        .venue-info h3 {
+          font-weight: 600;
+          color: #1e293b;
+          margin-bottom: 0.25rem;
+        }
+
+        .venue-info p {
+          display: flex;
+          align-items: center;
+          gap: 0.375rem;
+          color: #64748b;
+          font-size: 0.8125rem;
+        }
+
+        .status {
+          display: flex;
+          align-items: center;
+          gap: 0.375rem;
+          padding: 0.375rem 0.75rem;
+          border-radius: 6px;
+          font-size: 0.8125rem;
+          font-weight: 500;
+          text-transform: capitalize;
+        }
+
+        .status.active {
+          background: #dcfce7;
+          color: #16a34a;
+        }
+
+        .status.inactive {
+          background: #f1f5f9;
+          color: #64748b;
+        }
+
+        .actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .action-btn {
+          width: 34px;
+          height: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f1f5f9;
+          border: none;
+          border-radius: 6px;
+          color: #64748b;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+          background: #e2e8f0;
+          color: #1e293b;
+        }
+
+        .action-btn.delete:hover {
+          background: #fef2f2;
+          color: #dc2626;
+        }
+
+        .action-btn.view {
+          background: #3b82f6;
+          color: white;
+        }
+
+        .action-btn.view:hover {
+          background: #2563eb;
+        }
+      `}</style>
     </div>
   );
 }

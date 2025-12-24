@@ -1,70 +1,291 @@
 import { useState, useEffect } from 'react';
 import { 
-  Users, Search, Filter, Phone, Mail, Clock,
-  CheckCircle, XCircle, MoreVertical, Car, Star
+  Users, Search, Phone, Mail, Clock,
+  CheckCircle, XCircle, Car, Star, RefreshCw
 } from 'lucide-react';
 import { API_BASE_URL } from '../config/api';
 
+const styles = {
+  container: {
+    padding: '24px',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '24px',
+  },
+  title: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: 'white',
+    margin: 0,
+  },
+  subtitle: {
+    color: '#64748b',
+    fontSize: '14px',
+    margin: '4px 0 0 0',
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '16px',
+    marginBottom: '24px',
+  },
+  statCard: {
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '12px',
+    padding: '16px',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statLabel: {
+    color: '#64748b',
+    fontSize: '14px',
+    marginBottom: '4px',
+  },
+  statValue: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    margin: 0,
+  },
+  searchContainer: {
+    display: 'flex',
+    gap: '16px',
+    marginBottom: '24px',
+  },
+  searchBox: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+  },
+  searchInput: {
+    flex: 1,
+    background: 'transparent',
+    border: 'none',
+    outline: 'none',
+    color: '#e2e8f0',
+    fontSize: '14px',
+  },
+  select: {
+    background: 'rgba(30, 41, 59, 0.8)',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    color: '#e2e8f0',
+    fontSize: '14px',
+  },
+  driversGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '16px',
+  },
+  driverCard: {
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '12px',
+    padding: '16px',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    transition: 'all 0.2s',
+  },
+  driverHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+  },
+  driverInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  avatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    background: '#6366f1',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    fontWeight: '500',
+    fontSize: '14px',
+  },
+  driverName: {
+    color: 'white',
+    fontWeight: '500',
+    margin: 0,
+  },
+  driverUsername: {
+    color: '#64748b',
+    fontSize: '12px',
+  },
+  badge: {
+    padding: '4px 8px',
+    borderRadius: '9999px',
+    fontSize: '12px',
+    fontWeight: '500',
+  },
+  driverDetails: {
+    marginBottom: '12px',
+  },
+  detailRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#94a3b8',
+    fontSize: '14px',
+    marginBottom: '8px',
+  },
+  driverFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: '12px',
+    borderTop: '1px solid rgba(51, 65, 85, 0.5)',
+  },
+  driverStats: {
+    display: 'flex',
+    gap: '16px',
+  },
+  driverStat: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    fontSize: '14px',
+  },
+  refreshBtn: {
+    background: 'transparent',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    color: '#94a3b8',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+  },
+  loading: {
+    textAlign: 'center',
+    padding: '48px',
+  },
+  spinner: {
+    width: '32px',
+    height: '32px',
+    border: '2px solid rgba(99, 102, 241, 0.3)',
+    borderTopColor: '#6366f1',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+    margin: '0 auto 16px',
+  },
+  emptyState: {
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '12px',
+    padding: '48px',
+    textAlign: 'center',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+  },
+};
+
+function formatTimeEST(timestamp) {
+  if (!timestamp) return 'Never';
+  const date = new Date(timestamp);
+  return date.toLocaleString('en-US', { 
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
 function DriverCard({ driver }) {
   const statusColors = {
-    active: 'badge-success',
-    online: 'badge-success',
-    offline: 'badge-error',
-    busy: 'badge-warning',
+    online: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399' },
+    active: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399' },
+    available: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399' },
+    busy: { bg: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24' },
+    offline: { bg: 'rgba(239, 68, 68, 0.2)', color: '#f87171' },
+    break: { bg: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24' },
   };
 
+  const statusLabels = {
+    online: 'Online',
+    active: 'Active',
+    available: 'Available',
+    busy: 'Busy',
+    offline: 'Offline',
+    break: 'On Break',
+  };
+
+  const statusStyle = statusColors[driver.status] || statusColors.offline;
+
   return (
-    <div className="card card-hover p-4">
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
-            <span className="text-sm font-medium text-white">
-              {driver.fullName?.slice(0, 2).toUpperCase() || driver.username?.slice(0, 2).toUpperCase() || 'DR'}
-            </span>
+    <div style={styles.driverCard}>
+      <div style={styles.driverHeader}>
+        <div style={styles.driverInfo}>
+          <div style={styles.avatar}>
+            {(driver.full_name || driver.fullName || driver.username || 'DR').slice(0, 2).toUpperCase()}
           </div>
           <div>
-            <h4 className="font-medium text-white">{driver.fullName || driver.username}</h4>
-            <p className="text-xs text-slate-500">@{driver.username}</p>
+            <p style={styles.driverName}>{driver.full_name || driver.fullName || driver.username}</p>
+            <span style={styles.driverUsername}>@{driver.username}</span>
           </div>
         </div>
-        <span className={`badge ${statusColors[driver.status] || 'badge-info'}`}>
-          {driver.status || 'Active'}
+        <span style={{ ...styles.badge, background: statusStyle.bg, color: statusStyle.color }}>
+          {statusLabels[driver.status] || driver.status || 'Unknown'}
         </span>
       </div>
 
-      <div className="space-y-2 text-sm">
+      <div style={styles.driverDetails}>
         {driver.phone && (
-          <div className="flex items-center gap-2 text-slate-400">
+          <div style={styles.detailRow}>
             <Phone size={14} />
             <span>{driver.phone}</span>
           </div>
         )}
         {driver.email && (
-          <div className="flex items-center gap-2 text-slate-400">
+          <div style={styles.detailRow}>
             <Mail size={14} />
             <span>{driver.email}</span>
           </div>
         )}
-        <div className="flex items-center gap-2 text-slate-400">
+        <div style={styles.detailRow}>
           <Clock size={14} />
-          <span>Last login: {driver.lastLogin ? new Date(driver.lastLogin).toLocaleDateString() : 'Never'}</span>
+          <span>Last login: {formatTimeEST(driver.lastLogin)}</span>
         </div>
+        {driver.current_task && (
+          <div style={{ ...styles.detailRow, color: '#fbbf24' }}>
+            <Car size={14} />
+            <span>{driver.current_task}</span>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1 text-slate-400">
+      <div style={styles.driverFooter}>
+        <div style={styles.driverStats}>
+          <div style={{ ...styles.driverStat, color: '#94a3b8' }}>
             <Car size={14} />
-            <span className="text-sm">{driver.totalRetrievals || 0}</span>
+            <span>{driver.totalRetrievals || 0}</span>
           </div>
-          <div className="flex items-center gap-1 text-amber-400">
+          <div style={{ ...styles.driverStat, color: '#fbbf24' }}>
             <Star size={14} />
-            <span className="text-sm">{driver.rating || '5.0'}</span>
+            <span>{driver.rating || '5.0'}</span>
           </div>
         </div>
-        <button className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400">
-          <MoreVertical size={18} />
-        </button>
       </div>
     </div>
   );
@@ -75,6 +296,7 @@ export default function DriversPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
   const fetchDrivers = async () => {
     try {
@@ -82,6 +304,7 @@ export default function DriversPage() {
       const data = await response.json();
       if (data.success && data.drivers) {
         setDrivers(data.drivers);
+        setLastUpdate(new Date());
       }
     } catch (error) {
       console.error('Error fetching drivers:', error);
@@ -92,13 +315,15 @@ export default function DriversPage() {
 
   useEffect(() => {
     fetchDrivers();
+    const interval = setInterval(fetchDrivers, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const filteredDrivers = drivers.filter(d => {
     const matchesSearch = 
-      d.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.phone?.includes(searchQuery);
+      (d.full_name || d.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (d.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (d.phone || '').includes(searchQuery);
     
     const matchesStatus = statusFilter === 'all' || d.status === statusFilter;
     
@@ -107,94 +332,114 @@ export default function DriversPage() {
 
   const stats = {
     total: drivers.length,
-    online: drivers.filter(d => d.status === 'online').length,
-    active: drivers.filter(d => d.status === 'active').length,
+    online: drivers.filter(d => d.status === 'online' || d.status === 'active' || d.status === 'available').length,
+    busy: drivers.filter(d => d.status === 'busy').length,
+    offline: drivers.filter(d => d.status === 'offline').length,
   };
 
   return (
-    <div className="space-y-6">
+    <div style={styles.container}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div style={styles.header}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Drivers</h1>
-          <p className="text-slate-500">Manage valet drivers across venues</p>
+          <h1 style={styles.title}>Drivers</h1>
+          <p style={styles.subtitle}>Manage valet drivers • EST timezone</p>
+        </div>
+        <div style={styles.headerRight}>
+          {lastUpdate && (
+            <span style={{ color: '#64748b', fontSize: '12px' }}>
+              Updated {formatTimeEST(lastUpdate)}
+            </span>
+          )}
+          <button style={styles.refreshBtn} onClick={fetchDrivers}>
+            <RefreshCw size={18} />
+            Refresh
+          </button>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-500 text-sm">Total Drivers</p>
-              <p className="text-2xl font-bold text-white">{stats.total}</p>
-            </div>
-            <Users size={24} className="text-slate-600" />
+      <div style={styles.statsGrid}>
+        <div style={styles.statCard}>
+          <div>
+            <p style={styles.statLabel}>Total Drivers</p>
+            <p style={{ ...styles.statValue, color: 'white' }}>{stats.total}</p>
           </div>
+          <Users size={24} color="#475569" />
         </div>
-        <div className="card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-500 text-sm">Online Now</p>
-              <p className="text-2xl font-bold text-emerald-400">{stats.online}</p>
-            </div>
-            <CheckCircle size={24} className="text-emerald-600" />
+        <div style={styles.statCard}>
+          <div>
+            <p style={styles.statLabel}>Online</p>
+            <p style={{ ...styles.statValue, color: '#34d399' }}>{stats.online}</p>
           </div>
+          <CheckCircle size={24} color="#059669" />
         </div>
-        <div className="card p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-500 text-sm">Active</p>
-              <p className="text-2xl font-bold text-blue-400">{stats.active}</p>
-            </div>
-            <Car size={24} className="text-blue-600" />
+        <div style={styles.statCard}>
+          <div>
+            <p style={styles.statLabel}>Busy</p>
+            <p style={{ ...styles.statValue, color: '#fbbf24' }}>{stats.busy}</p>
           </div>
+          <Car size={24} color="#d97706" />
+        </div>
+        <div style={styles.statCard}>
+          <div>
+            <p style={styles.statLabel}>Offline</p>
+            <p style={{ ...styles.statValue, color: '#f87171' }}>{stats.offline}</p>
+          </div>
+          <XCircle size={24} color="#dc2626" />
         </div>
       </div>
 
       {/* Search & Filters */}
-      <div className="flex items-center gap-4">
-        <div className="flex-1 flex items-center gap-3 bg-slate-800/50 rounded-lg px-3 py-2">
-          <Search size={18} className="text-slate-500" />
+      <div style={styles.searchContainer}>
+        <div style={styles.searchBox}>
+          <Search size={18} color="#64748b" />
           <input 
             type="text"
             placeholder="Search drivers by name, username, or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-transparent border-none outline-none text-sm text-slate-300 placeholder-slate-500 w-full"
+            style={styles.searchInput}
           />
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300"
+          style={styles.select}
         >
           <option value="all">All Status</option>
           <option value="online">Online</option>
           <option value="active">Active</option>
+          <option value="busy">Busy</option>
           <option value="offline">Offline</option>
         </select>
       </div>
 
       {/* Drivers Grid */}
       {loading ? (
-        <div className="text-center py-12">
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-slate-500 mt-4">Loading drivers...</p>
+        <div style={styles.loading}>
+          <div style={styles.spinner} />
+          <p style={{ color: '#64748b' }}>Loading drivers...</p>
         </div>
       ) : filteredDrivers.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div style={styles.driversGrid}>
           {filteredDrivers.map((driver) => (
             <DriverCard key={driver.id} driver={driver} />
           ))}
         </div>
       ) : (
-        <div className="card p-8 text-center">
-          <Users size={48} className="mx-auto text-slate-600 mb-4" />
-          <h3 className="text-lg font-medium text-white mb-2">No drivers found</h3>
-          <p className="text-slate-500">Try adjusting your search or filters</p>
+        <div style={styles.emptyState}>
+          <Users size={48} color="#475569" style={{ marginBottom: '16px' }} />
+          <h3 style={{ color: 'white', fontWeight: '500', marginBottom: '8px' }}>No drivers found</h3>
+          <p style={{ color: '#64748b' }}>Try adjusting your search or filters</p>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -11,7 +11,8 @@ import {
   LogOut,
   Bell,
   Volume2,
-  Smartphone
+  Smartphone,
+  Settings
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { VENUE, APP_VERSION } from '../config/api';
@@ -35,6 +36,7 @@ export default function Sidebar({ queueCount = 0, alertCount = 0 }) {
       items: [
         { to: '/drivers', icon: Users, label: 'Drivers' },
         { to: '/shifts', icon: Clock, label: 'Shifts' },
+        { to: '/settings', icon: Settings, label: 'Settings' },
       ],
     },
     {

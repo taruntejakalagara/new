@@ -4,8 +4,7 @@ import {
   CheckCircle, XCircle, Shield, RefreshCw,
   Mail, Phone, Building
 } from 'lucide-react';
-
-const API_BASE_URL = 'http://192.168.12.154:4000/api';
+import { API_BASE_URL } from '../config/api';
 
 export default function ManagersPage() {
   const [managers, setManagers] = useState([]);

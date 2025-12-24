@@ -1,133 +1,181 @@
 import { useState, useEffect } from 'react';
 import { 
-  Settings, Wifi, Database, Bell, Shield, 
-  Save, RefreshCw, CheckCircle, AlertCircle
+  Settings, Save, RefreshCw, CheckCircle, AlertCircle,
+  DollarSign, Clock, Users, Bell
 } from 'lucide-react';
 import { API_BASE_URL } from '../config/api';
 
-function SettingSection({ title, description, children }) {
-  return (
-    <div className="card p-6">
-      <div className="mb-4">
-        <h3 className="font-semibold text-white">{title}</h3>
-        <p className="text-sm text-slate-500">{description}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ConnectionTest({ url, label }) {
-  const [status, setStatus] = useState('checking');
-  const [responseTime, setResponseTime] = useState(null);
-
-  const testConnection = async () => {
-    setStatus('checking');
-    const start = Date.now();
-    try {
-      const response = await fetch(`${url}/health`);
-      if (response.ok) {
-        setStatus('connected');
-        setResponseTime(Date.now() - start);
-      } else {
-        setStatus('error');
-      }
-    } catch (e) {
-      setStatus('error');
-    }
-  };
-
-  useEffect(() => {
-    testConnection();
-  }, [url]);
-
-  return (
-    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
-      <div className="flex items-center gap-3">
-        <Wifi size={18} className="text-slate-500" />
-        <div>
-          <p className="text-sm text-white">{label}</p>
-          <p className="text-xs text-slate-500 font-mono">{url}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        {status === 'checking' && (
-          <div className="flex items-center gap-2 text-slate-400">
-            <RefreshCw size={16} className="animate-spin" />
-            <span className="text-sm">Testing...</span>
-          </div>
-        )}
-        {status === 'connected' && (
-          <div className="flex items-center gap-2 text-emerald-400">
-            <CheckCircle size={16} />
-            <span className="text-sm">{responseTime}ms</span>
-          </div>
-        )}
-        {status === 'error' && (
-          <div className="flex items-center gap-2 text-red-400">
-            <AlertCircle size={16} />
-            <span className="text-sm">Failed</span>
-          </div>
-        )}
-        <button onClick={testConnection} className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400">
-          <RefreshCw size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function SettingsPage() {
-  const [apiUrl, setApiUrl] = useState(API_BASE_URL.replace('/api', ''));
-  const [saved, setSaved] = useState(false);
+  const [settings, setSettings] = useState({
+    pricingModel: 'flat',
+    flatRate: 15,
+    hourlyRate: 5,
+    priorityFee: 10,
+    maxHooks: 50,
+    retrievalTimeout: 15,
+    tipPolicy: 'individual',
+    suggestedTips: [3, 5, 10]
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
 
-  const handleSave = () => {
-    localStorage.setItem('digitalkey_api_url', apiUrl);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => { fetchSettings(); }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/settings`);
+      const data = await response.json();
+      if (data.success && data.settings) setSettings(prev => ({ ...prev, ...data.settings }));
+    } catch (error) { console.error('Error:', error); }
+    finally { setLoading(false); }
   };
 
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      const data = await response.json();
+      if (data.success) setMessage({ type: 'success', text: 'Settings saved!' });
+      else setMessage({ type: 'error', text: data.message || 'Failed' });
+    } catch { setMessage({ type: 'error', text: 'Network error' }); }
+    finally { setSaving(false); setTimeout(() => setMessage({ type: '', text: '' }), 3000); }
+  };
+
+  if (loading) return <div className="loading"><RefreshCw size={32} className="spin" /></div>;
+
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Settings</h1>
-          <p className="text-slate-500">Configure your admin dashboard</p>
+    <div className="settings-page">
+      <header className="page-header">
+        <div><h1>Settings</h1><p>Configure system settings</p></div>
+        <div className="header-actions">
+          <button className="btn-reset" onClick={fetchSettings}><RefreshCw size={18} />Reset</button>
+          <button className="btn-save" onClick={handleSave} disabled={saving}>
+            {saving ? <span className="spinner" /> : <><Save size={18} />Save Changes</>}
+          </button>
         </div>
-        <button onClick={handleSave} className="btn btn-primary">
-          {saved ? <CheckCircle size={18} /> : <Save size={18} />}
-          {saved ? 'Saved!' : 'Save Changes'}
-        </button>
+      </header>
+
+      {message.text && (
+        <div className={`message ${message.type}`}>
+          {message.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+          {message.text}
+        </div>
+      )}
+
+      <div className="settings-grid">
+        {/* Pricing Settings */}
+        <div className="settings-card">
+          <div className="card-header"><DollarSign size={20} /><h3>Pricing</h3></div>
+          <div className="card-content">
+            <div className="form-group">
+              <label>Pricing Model</label>
+              <select value={settings.pricingModel} onChange={(e) => setSettings({...settings, pricingModel: e.target.value})}>
+                <option value="flat">Flat Rate</option>
+                <option value="hourly">Hourly</option>
+                <option value="tiered">Tiered</option>
+              </select>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Flat Rate ($)</label>
+                <input type="number" value={settings.flatRate} onChange={(e) => setSettings({...settings, flatRate: parseFloat(e.target.value)})} />
+              </div>
+              <div className="form-group">
+                <label>Hourly Rate ($)</label>
+                <input type="number" value={settings.hourlyRate} onChange={(e) => setSettings({...settings, hourlyRate: parseFloat(e.target.value)})} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Priority Fee ($)</label>
+              <input type="number" value={settings.priorityFee} onChange={(e) => setSettings({...settings, priorityFee: parseFloat(e.target.value)})} />
+            </div>
+          </div>
+        </div>
+
+        {/* Operations Settings */}
+        <div className="settings-card">
+          <div className="card-header"><Clock size={20} /><h3>Operations</h3></div>
+          <div className="card-content">
+            <div className="form-group">
+              <label>Max Hooks per Station</label>
+              <input type="number" value={settings.maxHooks} onChange={(e) => setSettings({...settings, maxHooks: parseInt(e.target.value)})} />
+            </div>
+            <div className="form-group">
+              <label>Retrieval Timeout (minutes)</label>
+              <input type="number" value={settings.retrievalTimeout} onChange={(e) => setSettings({...settings, retrievalTimeout: parseInt(e.target.value)})} />
+            </div>
+          </div>
+        </div>
+
+        {/* Tips Settings */}
+        <div className="settings-card">
+          <div className="card-header"><Users size={20} /><h3>Tips</h3></div>
+          <div className="card-content">
+            <div className="form-group">
+              <label>Tip Policy</label>
+              <select value={settings.tipPolicy} onChange={(e) => setSettings({...settings, tipPolicy: e.target.value})}>
+                <option value="individual">Individual (per driver)</option>
+                <option value="pooled">Pooled (shared)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Suggested Tip Amounts ($)</label>
+              <div className="tip-inputs">
+                {settings.suggestedTips.map((tip, i) => (
+                  <input key={i} type="number" value={tip} 
+                    onChange={(e) => {
+                      const newTips = [...settings.suggestedTips];
+                      newTips[i] = parseInt(e.target.value);
+                      setSettings({...settings, suggestedTips: newTips});
+                    }} 
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <SettingSection title="Connection Settings" description="Configure API server connection">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-2">API Server URL</label>
-            <input
-              type="text"
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-              placeholder="http://192.168.1.100:4000"
-            />
-          </div>
-          <ConnectionTest url={apiUrl} label="API Server" />
-        </div>
-      </SettingSection>
+      <style>{`
+        .settings-page { padding: 2rem; }
+        .loading { display: flex; justify-content: center; align-items: center; height: 50vh; }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
 
-      <SettingSection title="System Information" description="Current system configuration">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="p-3 bg-slate-900/50 rounded-lg">
-            <p className="text-xs text-slate-500 mb-1">Dashboard Version</p>
-            <p className="text-sm text-white font-mono">1.0.0</p>
-          </div>
-          <div className="p-3 bg-slate-900/50 rounded-lg">
-            <p className="text-xs text-slate-500 mb-1">API Endpoint</p>
-            <p className="text-sm text-white font-mono truncate">{API_BASE_URL}</p>
-          </div>
-        </div>
-      </SettingSection>
+        .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+        .page-header h1 { font-size: 1.5rem; font-weight: 700; color: #1e293b; }
+        .page-header p { color: #64748b; font-size: 0.875rem; }
+        .header-actions { display: flex; gap: 0.75rem; }
+        .btn-reset { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem; background: white; border: 1px solid #e2e8f0; border-radius: 8px; font-weight: 500; cursor: pointer; }
+        .btn-save { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; }
+        .btn-save:disabled { opacity: 0.7; }
+
+        .message { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+        .message.success { background: #dcfce7; color: #16a34a; }
+        .message.error { background: #fef2f2; color: #dc2626; }
+
+        .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; }
+        .settings-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+        .card-header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        .card-header h3 { font-size: 1rem; font-weight: 600; color: #1e293b; }
+        .card-header svg { color: #3b82f6; }
+        .card-content { padding: 1.25rem; }
+
+        .form-group { margin-bottom: 1rem; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-group label { display: block; font-size: 0.8125rem; font-weight: 500; color: #374151; margin-bottom: 0.375rem; }
+        .form-group input, .form-group select { width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9375rem; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #3b82f6; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .tip-inputs { display: flex; gap: 0.75rem; }
+        .tip-inputs input { width: 80px; text-align: center; }
+      `}</style>
     </div>
   );
 }

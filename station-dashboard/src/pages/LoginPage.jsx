@@ -6,9 +6,8 @@ import { API_BASE_URL } from '../config/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { loginWithManager } = useAuth();
   
-  // Default theme colors
   const theme = {
     primary: '#1e40af',
     secondary: '#3b82f6',
@@ -25,7 +24,8 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/managers/login`, {
+      const url = API_BASE_URL + '/managers/login';
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),
@@ -34,7 +34,7 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (data.success) {
-        login(data.manager);
+        loginWithManager(data.manager);
         navigate('/dashboard');
       } else {
         setError(data.message || 'Invalid credentials');
@@ -47,7 +47,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div 
+    <div
       className="login-container"
       style={{
         minHeight: '100vh',
@@ -58,7 +58,7 @@ export default function LoginPage() {
         padding: '2rem',
       }}
     >
-      <div 
+      <div
         className="login-card"
         style={{
           background: 'white',
@@ -69,9 +69,8 @@ export default function LoginPage() {
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
         }}
       >
-        {/* Logo/Brand */}
         <div className="login-header" style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div 
+          <div
             style={{
               width: '80px',
               height: '80px',
@@ -93,9 +92,8 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Error Message */}
         {error && (
-          <div 
+          <div
             style={{
               background: '#fef2f2',
               border: '1px solid #fecaca',
@@ -112,16 +110,15 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Login Form */}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.25rem' }}>
-            <label 
-              style={{ 
-                display: 'block', 
-                fontSize: '0.875rem', 
-                fontWeight: '500', 
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '500',
                 color: '#374151',
-                marginBottom: '0.5rem' 
+                marginBottom: '0.5rem'
               }}
             >
               Username
@@ -147,13 +144,13 @@ export default function LoginPage() {
           </div>
 
           <div style={{ marginBottom: '1.5rem' }}>
-            <label 
-              style={{ 
-                display: 'block', 
-                fontSize: '0.875rem', 
-                fontWeight: '500', 
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '500',
                 color: '#374151',
-                marginBottom: '0.5rem' 
+                marginBottom: '0.5rem'
               }}
             >
               Password
@@ -201,7 +198,7 @@ export default function LoginPage() {
           >
             {loading ? (
               <>
-                <div 
+                <div
                   style={{
                     width: '20px',
                     height: '20px',
@@ -222,7 +219,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Footer */}
         <div style={{ textAlign: 'center', marginTop: '2rem' }}>
           <p style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
             Need access? Contact your administrator

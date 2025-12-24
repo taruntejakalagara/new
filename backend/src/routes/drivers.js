@@ -1,499 +1,299 @@
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
+const path = require('path');
 
-// Helper function to hash passwords
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+// Get database - try multiple methods
+function getDb(req) {
+  // Method 1: From request (middleware)
+  if (req.db) return req.db;
+  
+  // Method 2: From app locals
+  if (req.app && req.app.locals && req.app.locals.db) return req.app.locals.db;
+  
+  // Method 3: From app.get('db')
+  if (req.app && req.app.get('db')) return req.app.get('db');
+  
+  // Method 4: Direct import (fallback)
+  try {
+    const Database = require('better-sqlite3');
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'database.db');
+    return new Database(dbPath);
+  } catch (err) {
+    console.error('Failed to get database:', err);
+    return null;
+  }
 }
-
-// POST /api/drivers - Register new driver
-router.post('/', (req, res) => {
-  const db = req.app.get('db');
-  const {
-    fullName,
-    username,
-    password,
-    phone,
-    email,
-    licenseNumber,
-    vehicleInfo,
-    emergencyContact,
-    emergencyPhone
-  } = req.body;
-
-  // Validate required fields
-  if (!fullName || !username || !password || !phone) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Missing required fields: fullName, username, password, phone' 
-    });
-  }
-
-  try {
-    // Check if username already exists
-    const existingDriver = db.prepare(
-      'SELECT id FROM drivers WHERE username = ?'
-    ).get(username);
-
-    if (existingDriver) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Username already exists' 
-      });
-    }
-
-    // Hash password
-    const hashedPassword = hashPassword(password);
-    const now = new Date().toISOString();
-
-    // Insert new driver
-    const stmt = db.prepare(`
-      INSERT INTO drivers (
-        fullName, username, password, phone, email, 
-        licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
-        status, createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const result = stmt.run(
-      fullName,
-      username,
-      hashedPassword,
-      phone,
-      email || null,
-      licenseNumber || null,
-      vehicleInfo || null,
-      emergencyContact || null,
-      emergencyPhone || null,
-      'active',
-      now
-    );
-
-    res.json({ 
-      success: true, 
-      message: 'Driver registered successfully',
-      driverId: result.lastInsertRowid
-    });
-
-  } catch (error) {
-    console.error('Driver registration error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error registering driver',
-      error: error.message 
-    });
-  }
-});
-
-// POST /api/drivers/register - Alias for driver registration (used by station dashboard)
-router.post('/register', (req, res) => {
-  const db = req.app.get('db');
-  const {
-    fullName,
-    full_name,
-    username,
-    password,
-    phone,
-    email,
-    licenseNumber,
-    license_number,
-    vehicleInfo,
-    emergencyContact,
-    emergencyPhone
-  } = req.body;
-
-  // Support both camelCase and snake_case
-  const name = fullName || full_name;
-  const license = licenseNumber || license_number;
-
-  // Validate required fields
-  if (!name || !username || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Missing required fields: fullName, username, password' 
-    });
-  }
-
-  try {
-    // Check if username already exists
-    const existingDriver = db.prepare(
-      'SELECT id FROM drivers WHERE username = ?'
-    ).get(username);
-
-    if (existingDriver) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Username already exists' 
-      });
-    }
-
-    // Hash password
-    const hashedPassword = hashPassword(password);
-    const now = new Date().toISOString();
-
-    // Insert new driver
-    const stmt = db.prepare(`
-      INSERT INTO drivers (
-        fullName, username, password, phone, email, 
-        licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
-        status, createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const result = stmt.run(
-      name,
-      username,
-      hashedPassword,
-      phone || null,
-      email || null,
-      license || null,
-      vehicleInfo || null,
-      emergencyContact || null,
-      emergencyPhone || null,
-      'active',
-      now
-    );
-
-    res.json({ 
-      success: true, 
-      message: 'Driver registered successfully',
-      driverId: result.lastInsertRowid,
-      driver: {
-        id: result.lastInsertRowid,
-        fullName: name,
-        username: username,
-        status: 'active'
-      }
-    });
-
-  } catch (error) {
-    console.error('Driver registration error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error registering driver',
-      error: error.message 
-    });
-  }
-});
-
-// POST /api/drivers/login - Driver login
-router.post('/login', (req, res) => {
-  const db = req.app.get('db');
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Username and password required' 
-    });
-  }
-
-  try {
-    const hashedPassword = hashPassword(password);
-    
-    const driver = db.prepare(`
-      SELECT id, fullName, username, phone, email, status, licenseNumber, vehicleInfo
-      FROM drivers 
-      WHERE username = ? AND password = ?
-    `).get(username, hashedPassword);
-
-    if (!driver) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid username or password' 
-      });
-    }
-
-    // Accept both 'active' and 'online' status for login
-    if (driver.status !== 'active' && driver.status !== 'online' && driver.status !== 'available') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Driver account is not active' 
-      });
-    }
-
-    // Update last login
-    const now = new Date().toISOString();
-    db.prepare('UPDATE drivers SET lastLogin = ? WHERE id = ?')
-      .run(now, driver.id);
-
-    // Update driver status to online
-    db.prepare('UPDATE drivers SET status = ? WHERE id = ?')
-      .run('online', driver.id);
-
-    res.json({ 
-      success: true, 
-      driver: {
-        id: driver.id,
-        fullName: driver.fullName,
-        username: driver.username,
-        phone: driver.phone,
-        email: driver.email,
-        status: 'online'
-      }
-    });
-
-  } catch (error) {
-    console.error('Driver login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Login error',
-      error: error.message 
-    });
-  }
-});
-
-// POST /api/drivers/logout - Driver logout
-router.post('/logout', (req, res) => {
-  const db = req.app.get('db');
-  const { driverId } = req.body;
-
-  if (!driverId) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Driver ID required' 
-    });
-  }
-
-  try {
-    db.prepare('UPDATE drivers SET status = ? WHERE id = ?')
-      .run('active', driverId);
-
-    res.json({ 
-      success: true, 
-      message: 'Logged out successfully' 
-    });
-
-  } catch (error) {
-    console.error('Driver logout error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Logout error',
-      error: error.message 
-    });
-  }
-});
 
 // GET /api/drivers - Get all drivers
 router.get('/', (req, res) => {
-  const db = req.app.get('db');
-  
   try {
-    const drivers = db.prepare(`
-      SELECT id, fullName, username, phone, email, status, 
-             licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
-             createdAt, lastLogin
-      FROM drivers 
-      ORDER BY createdAt DESC
-    `).all();
-
-    res.json({ success: true, drivers });
-
+    const db = getDb(req);
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
+    }
+    
+    // First check what columns exist in the drivers table
+    let tableInfo;
+    try {
+      tableInfo = db.prepare("PRAGMA table_info(drivers)").all();
+    } catch (e) {
+      // Table might not exist
+      return res.json({ success: true, drivers: [] });
+    }
+    
+    const columns = tableInfo.map(col => col.name);
+    
+    if (columns.length === 0) {
+      return res.json({ success: true, drivers: [] });
+    }
+    
+    // Build SELECT based on available columns
+    const selectColumns = [];
+    
+    if (columns.includes('id')) selectColumns.push('id');
+    if (columns.includes('username')) selectColumns.push('username');
+    if (columns.includes('full_name')) selectColumns.push('full_name');
+    if (columns.includes('fullName')) selectColumns.push('fullName');
+    if (columns.includes('phone')) selectColumns.push('phone');
+    if (columns.includes('email')) selectColumns.push('email');
+    if (columns.includes('status')) selectColumns.push('status');
+    if (columns.includes('lastLogin')) selectColumns.push('lastLogin');
+    if (columns.includes('last_login')) selectColumns.push('last_login');
+    if (columns.includes('current_task')) selectColumns.push('current_task');
+    if (columns.includes('venue_id')) selectColumns.push('venue_id');
+    if (columns.includes('created_at')) selectColumns.push('created_at');
+    
+    if (selectColumns.length === 0) {
+      selectColumns.push('*');
+    }
+    
+    const query = `SELECT ${selectColumns.join(', ')} FROM drivers`;
+    // Query built dynamically based on available columns
+    
+    const drivers = db.prepare(query).all();
+    
+    // Normalize the response
+    const normalizedDrivers = drivers.map(d => ({
+      id: d.id,
+      username: d.username || 'unknown',
+      full_name: d.full_name || d.fullName || d.username || 'Unknown',
+      fullName: d.full_name || d.fullName || d.username || 'Unknown',
+      phone: d.phone || null,
+      email: d.email || null,
+      status: d.status || 'offline',
+      lastLogin: d.lastLogin || d.last_login || null,
+      current_task: d.current_task || null,
+      venue_id: d.venue_id || null,
+    }));
+    
+    res.json({ success: true, drivers: normalizedDrivers });
   } catch (error) {
-    console.error('Get drivers error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching drivers',
-      error: error.message 
-    });
+    console.error('Error fetching drivers:', error);
+    res.status(500).json({ success: false, error: error.message, stack: error.stack });
   }
 });
 
 // GET /api/drivers/:id - Get single driver
 router.get('/:id', (req, res) => {
-  const db = req.app.get('db');
-  const { id } = req.params;
-
   try {
-    const driver = db.prepare(`
-      SELECT id, fullName, username, phone, email, status, 
-             licenseNumber, vehicleInfo, emergencyContact, emergencyPhone,
-             createdAt, lastLogin
-      FROM drivers 
-      WHERE id = ?
-    `).get(id);
-
+    const db = getDb(req);
+    const { id } = req.params;
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
+    }
+    
+    const driver = db.prepare('SELECT * FROM drivers WHERE id = ?').get(id);
+    
     if (!driver) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Driver not found' 
-      });
+      return res.status(404).json({ success: false, error: 'Driver not found' });
     }
-
-    res.json({ success: true, driver });
-
-  } catch (error) {
-    console.error('Get driver error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching driver',
-      error: error.message 
-    });
-  }
-});
-
-// PUT /api/drivers/:id - Update driver
-router.put('/:id', (req, res) => {
-  const db = req.app.get('db');
-  const { id } = req.params;
-  const {
-    fullName,
-    phone,
-    email,
-    licenseNumber,
-    vehicleInfo,
-    emergencyContact,
-    emergencyPhone,
-    status
-  } = req.body;
-
-  try {
-    const stmt = db.prepare(`
-      UPDATE drivers 
-      SET fullName = ?, phone = ?, email = ?, 
-          licenseNumber = ?, vehicleInfo = ?, 
-          emergencyContact = ?, emergencyPhone = ?, status = ?
-      WHERE id = ?
-    `);
-
-    const result = stmt.run(
-      fullName,
-      phone,
-      email || null,
-      licenseNumber || null,
-      vehicleInfo || null,
-      emergencyContact || null,
-      emergencyPhone || null,
-      status || 'active',
-      id
-    );
-
-    if (result.changes === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Driver not found' 
-      });
-    }
-
+    
     res.json({ 
       success: true, 
-      message: 'Driver updated successfully' 
+      driver: {
+        ...driver,
+        full_name: driver.full_name || driver.fullName || driver.username,
+        fullName: driver.full_name || driver.fullName || driver.username,
+        lastLogin: driver.lastLogin || driver.last_login || null,
+      }
     });
-
   } catch (error) {
-    console.error('Update driver error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error updating driver',
-      error: error.message 
-    });
+    console.error('Error fetching driver:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
+// POST /api/drivers - Create driver  
+router.post('/', (req, res) => {
+  try {
+    const db = getDb(req);
+    const { username, password, full_name, phone, email, venue_id } = req.body;
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
+    }
+    
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Username and password required' });
+    }
+    
+    // Check what columns exist
+    const tableInfo = db.prepare("PRAGMA table_info(drivers)").all();
+    const columns = tableInfo.map(col => col.name);
+    
+    // Build INSERT based on available columns
+    const insertColumns = ['username', 'password'];
+    const insertValues = [username, password];
+    const placeholders = ['?', '?'];
+    
+    if (columns.includes('full_name') && full_name) {
+      insertColumns.push('full_name');
+      insertValues.push(full_name);
+      placeholders.push('?');
+    }
+    if (columns.includes('phone') && phone) {
+      insertColumns.push('phone');
+      insertValues.push(phone);
+      placeholders.push('?');
+    }
+    if (columns.includes('email') && email) {
+      insertColumns.push('email');
+      insertValues.push(email);
+      placeholders.push('?');
+    }
+    if (columns.includes('venue_id') && venue_id) {
+      insertColumns.push('venue_id');
+      insertValues.push(venue_id);
+      placeholders.push('?');
+    }
+    if (columns.includes('status')) {
+      insertColumns.push('status');
+      insertValues.push('offline');
+      placeholders.push('?');
+    }
+    
+    const query = `INSERT INTO drivers (${insertColumns.join(', ')}) VALUES (${placeholders.join(', ')})`;
+    const result = db.prepare(query).run(...insertValues);
+    
+    res.json({ 
+      success: true, 
+      driver: { 
+        id: result.lastInsertRowid, 
+        username, 
+        full_name: full_name || username,
+        status: 'offline'
+      } 
+    });
+  } catch (error) {
+    console.error('Error creating driver:', error);
+    if (error.message.includes('UNIQUE constraint')) {
+      return res.status(400).json({ success: false, error: 'Username already exists' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/drivers/:id/status - Update driver status
+router.put('/:id/status', (req, res) => {
+  try {
+    const db = getDb(req);
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
+    }
+    
+    if (!status) {
+      return res.status(400).json({ success: false, error: 'Status required' });
+    }
+    
+    db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run(status, id);
+    
+    res.json({ success: true, message: 'Status updated' });
+  } catch (error) {
+    console.error('Error updating driver status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // DELETE /api/drivers/:id - Delete driver
 router.delete('/:id', (req, res) => {
-  const db = req.app.get('db');
-  const { id } = req.params;
-
   try {
-    // Check if driver has active tasks
-    const activeTasks = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM retrieval_requests 
-      WHERE assigned_driver_id = ? 
-      AND status IN ('assigned', 'retrieving')
-    `).get(id);
-
-    if (activeTasks.count > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cannot delete driver with active tasks. Please complete or reassign tasks first.' 
-      });
+    const db = getDb(req);
+    const { id } = req.params;
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
     }
-
-    // Unassign driver from all requests
-    const unassignResult = db.prepare(`
-      UPDATE retrieval_requests 
-      SET assigned_driver_id = NULL 
-      WHERE assigned_driver_id = ?
-    `).run(id);
-
-    console.log('Unassigned driver from', unassignResult.changes, 'requests');
-
-    // Now delete the driver
+    
     const result = db.prepare('DELETE FROM drivers WHERE id = ?').run(id);
-
+    
     if (result.changes === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Driver not found' 
-      });
+      return res.status(404).json({ success: false, error: 'Driver not found' });
     }
-
-    res.json({ 
-      success: true, 
-      message: 'Driver deleted successfully' 
-    });
-
+    
+    res.json({ success: true, message: 'Driver deleted' });
   } catch (error) {
-    console.error('Delete driver error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message
-    });
+    console.error('Error deleting driver:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET /api/drivers/stats/:id - Get driver statistics
-router.get('/stats/:id', (req, res) => {
-  const db = req.app.get('db');
-  const { id } = req.params;
-
+// POST /api/drivers/login - Driver login
+router.post('/login', (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Completed today by this driver
-    const completedToday = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM retrieval_requests 
-      WHERE assigned_driver_id = ? 
-        AND status = 'completed' 
-        AND DATE(completed_at, 'localtime') = ?
-    `).get(id, today);
-    
-    // Active tasks (vehicles waiting in retrieval queue)
-    const activeTasks = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM retrieval_requests 
-      WHERE status = 'pending'
-    `).get();
-    
-    // Pending handovers (retrieving status, ready to hand over)
-    const pendingHandovers = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM retrieval_requests 
-      WHERE assigned_driver_id = ? 
-        AND status = 'retrieving'
-    `).get(id);
+    const db = getDb(req);
+    if (!db) {
+      return res.status(500).json({ success: false, error: 'Database not available' });
+    }
 
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password required' });
+    }
+
+    const driver = db.prepare(`
+      SELECT id, username, password, fullName, phone, email, status
+      FROM drivers WHERE username = ?
+    `).get(username);
+
+    if (!driver) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Check password - support both plain text and SHA256 hash
+    const crypto = require('crypto');
+    const hashedInput = crypto.createHash('sha256').update(password).digest('hex');
+    
+    const validPassword = (driver.password === password) || (driver.password === hashedInput);
+    
+    if (!validPassword) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Update last login and status
+    db.prepare(`UPDATE drivers SET lastLogin = datetime('now'), status = 'online' WHERE id = ?`).run(driver.id);
+
+    // Return driver without password
+    delete driver.password;
     res.json({ 
       success: true, 
-      stats: {
-        completedToday: completedToday.count || 0,
-        activeTasks: activeTasks.count || 0,
-        pendingHandovers: pendingHandovers.count || 0
+      driver: {
+        id: driver.id,
+        username: driver.username,
+        fullName: driver.fullName,
+        phone: driver.phone,
+        email: driver.email,
+        status: 'online'
       }
     });
-
   } catch (error) {
-    console.error('Get driver stats error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching driver stats',
-      error: error.message 
-    });
+    console.error('Driver login error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

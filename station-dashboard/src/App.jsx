@@ -17,6 +17,7 @@ import ShiftsPage from './pages/ShiftsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CloseoutPage from './pages/CloseoutPage';
 import StationOperationsPage from './pages/StationOperationsPage';
+import SettingsPage from './pages/SettingsPage';
 
 // Protected route wrapper
 function ProtectedRoute({ children }) {
@@ -72,6 +73,7 @@ function AppLayout() {
           <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/closeout" element={<CloseoutPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

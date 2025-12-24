@@ -1,46 +1,263 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Activity, Car, Clock, CheckCircle, XCircle, 
-  Users, ArrowRight, RefreshCw, Pause, Play,
-  AlertTriangle, Filter
+  RefreshCw, Pause, Play, Filter, Zap
 } from 'lucide-react';
 import { API_BASE_URL, REFRESH_INTERVALS } from '../config/api';
 
+const styles = {
+  container: {
+    padding: '24px',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '24px',
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  title: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: 'white',
+    margin: 0,
+  },
+  liveIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+  },
+  liveDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    animation: 'pulse 2s infinite',
+  },
+  subtitle: {
+    color: '#64748b',
+    fontSize: '14px',
+    margin: '4px 0 0 0',
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  btn: {
+    padding: '8px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.2s',
+  },
+  btnWarning: {
+    background: 'rgba(245, 158, 11, 0.2)',
+    color: '#fbbf24',
+  },
+  btnSuccess: {
+    background: 'rgba(16, 185, 129, 0.2)',
+    color: '#34d399',
+  },
+  btnGhost: {
+    background: 'transparent',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    color: '#94a3b8',
+  },
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '16px',
+    marginBottom: '24px',
+  },
+  statCard: {
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '12px',
+    padding: '12px 16px',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  statIcon: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statValue: {
+    fontSize: '18px',
+    fontWeight: 'bold',
+    margin: 0,
+    color: 'white',
+  },
+  statLabel: {
+    color: '#64748b',
+    fontSize: '12px',
+  },
+  filterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '16px',
+  },
+  filterBtn: {
+    padding: '8px 12px',
+    borderRadius: '8px',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'all 0.2s',
+  },
+  filterBtnActive: {
+    background: '#6366f1',
+    color: 'white',
+  },
+  filterBtnInactive: {
+    background: 'rgba(30, 41, 59, 0.8)',
+    color: '#94a3b8',
+  },
+  feedCard: {
+    background: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: '12px',
+    border: '1px solid rgba(51, 65, 85, 0.5)',
+    overflow: 'hidden',
+  },
+  feedContainer: {
+    maxHeight: 'calc(100vh - 380px)',
+    overflowY: 'auto',
+  },
+  activityItem: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '16px',
+    padding: '16px',
+    borderBottom: '1px solid rgba(51, 65, 85, 0.3)',
+    transition: 'background 0.2s',
+  },
+  activityIcon: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  activityContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  activityBadges: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '4px',
+  },
+  badge: {
+    padding: '2px 8px',
+    borderRadius: '9999px',
+    fontSize: '11px',
+    fontWeight: '500',
+  },
+  activityMessage: {
+    color: 'white',
+    fontSize: '14px',
+    margin: '0 0 4px 0',
+  },
+  activityDetails: {
+    color: '#64748b',
+    fontSize: '12px',
+    margin: 0,
+  },
+  activityMeta: {
+    textAlign: 'right',
+    flexShrink: 0,
+  },
+  activityTime: {
+    color: '#64748b',
+    fontSize: '12px',
+  },
+  activityDriver: {
+    color: '#94a3b8',
+    fontSize: '12px',
+    marginTop: '4px',
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '48px',
+  },
+};
+
+function formatTimeEST(timestamp) {
+  if (!timestamp) return 'Just now';
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString('en-US', { 
+    timeZone: 'America/New_York',
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true 
+  });
+}
+
 function ActivityItem({ activity, isNew }) {
-  const icons = {
-    checkin: { icon: Car, color: 'text-emerald-400', bg: 'bg-emerald-500/20', label: 'Check In' },
-    request: { icon: Clock, color: 'text-amber-400', bg: 'bg-amber-500/20', label: 'Request' },
-    assigned: { icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/20', label: 'Assigned' },
-    ready: { icon: CheckCircle, color: 'text-indigo-400', bg: 'bg-indigo-500/20', label: 'Ready' },
-    complete: { icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/20', label: 'Complete' },
-    cancelled: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/20', label: 'Cancelled' },
-    error: { icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-500/20', label: 'Error' },
+  const configs = {
+    checkin: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399', Icon: Car, label: 'Check In' },
+    pending: { bg: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', Icon: Clock, label: 'Pending' },
+    request: { bg: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', Icon: Clock, label: 'Request' },
+    assigned: { bg: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', Icon: Car, label: 'Assigned' },
+    ready: { bg: 'rgba(99, 102, 241, 0.2)', color: '#818cf8', Icon: CheckCircle, label: 'Ready' },
+    completed: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399', Icon: CheckCircle, label: 'Complete' },
+    complete: { bg: 'rgba(16, 185, 129, 0.2)', color: '#34d399', Icon: CheckCircle, label: 'Complete' },
+    cancelled: { bg: 'rgba(239, 68, 68, 0.2)', color: '#f87171', Icon: XCircle, label: 'Cancelled' },
   };
 
-  const config = icons[activity.type] || icons.checkin;
-  const Icon = config.icon;
+  const config = configs[activity.type] || configs.checkin;
+  const Icon = config.Icon;
 
   return (
-    <div className={`flex items-start gap-4 p-4 border-b border-slate-800 hover:bg-slate-800/30 transition-colors ${isNew ? 'animate-slide-in bg-slate-800/50' : ''}`}>
-      <div className={`p-2.5 rounded-xl ${config.bg}`}>
-        <Icon size={20} className={config.color} />
+    <div style={{ 
+      ...styles.activityItem, 
+      background: isNew ? 'rgba(30, 41, 59, 0.8)' : 'transparent',
+      animation: isNew ? 'slideIn 0.3s ease-out' : 'none'
+    }}>
+      <div style={{ ...styles.activityIcon, background: config.bg }}>
+        <Icon size={20} color={config.color} />
       </div>
       
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className={`badge ${config.bg} ${config.color}`}>{config.label}</span>
-          <span className="text-xs text-slate-500">{activity.venue}</span>
+      <div style={styles.activityContent}>
+        <div style={styles.activityBadges}>
+          <span style={{ ...styles.badge, background: config.bg, color: config.color }}>
+            {config.label}
+          </span>
+          {activity.isPriority && (
+            <span style={{ ...styles.badge, background: 'rgba(234, 179, 8, 0.2)', color: '#facc15' }}>
+              ⚡ PRIORITY
+            </span>
+          )}
+          <span style={{ color: '#64748b', fontSize: '12px' }}>{activity.venue}</span>
         </div>
-        <p className="text-sm text-white">{activity.message}</p>
+        <p style={styles.activityMessage}>{activity.message}</p>
         {activity.details && (
-          <p className="text-xs text-slate-500 mt-1">{activity.details}</p>
+          <p style={styles.activityDetails}>{activity.details}</p>
         )}
       </div>
       
-      <div className="text-right">
-        <p className="text-xs text-slate-500">{activity.time}</p>
-        {activity.duration && (
-          <p className="text-xs text-slate-400 mt-1">{activity.duration}</p>
+      <div style={styles.activityMeta}>
+        <p style={styles.activityTime}>{activity.time}</p>
+        {activity.driver && (
+          <p style={styles.activityDriver}>Driver: {activity.driver}</p>
         )}
       </div>
     </div>
@@ -49,41 +266,41 @@ function ActivityItem({ activity, isNew }) {
 
 function StatsBar({ stats }) {
   return (
-    <div className="grid grid-cols-4 gap-4 mb-6">
-      <div className="card p-3 flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-emerald-500/20">
-          <Car size={18} className="text-emerald-400" />
+    <div style={styles.statsGrid}>
+      <div style={styles.statCard}>
+        <div style={{ ...styles.statIcon, background: 'rgba(16, 185, 129, 0.2)' }}>
+          <Car size={18} color="#34d399" />
         </div>
         <div>
-          <p className="text-lg font-bold text-white">{stats.checkIns}</p>
-          <p className="text-xs text-slate-500">Check-ins today</p>
+          <p style={styles.statValue}>{stats.parked}</p>
+          <span style={styles.statLabel}>Vehicles Parked</span>
         </div>
       </div>
-      <div className="card p-3 flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-amber-500/20">
-          <Clock size={18} className="text-amber-400" />
+      <div style={styles.statCard}>
+        <div style={{ ...styles.statIcon, background: 'rgba(59, 130, 246, 0.2)' }}>
+          <Car size={18} color="#60a5fa" />
         </div>
         <div>
-          <p className="text-lg font-bold text-white">{stats.pending}</p>
-          <p className="text-xs text-slate-500">Pending requests</p>
+          <p style={styles.statValue}>{stats.checkIns}</p>
+          <span style={styles.statLabel}>Check-ins today</span>
         </div>
       </div>
-      <div className="card p-3 flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-blue-500/20">
-          <CheckCircle size={18} className="text-blue-400" />
+      <div style={styles.statCard}>
+        <div style={{ ...styles.statIcon, background: 'rgba(245, 158, 11, 0.2)' }}>
+          <Clock size={18} color="#fbbf24" />
         </div>
         <div>
-          <p className="text-lg font-bold text-white">{stats.completed}</p>
-          <p className="text-xs text-slate-500">Completed today</p>
+          <p style={styles.statValue}>{stats.pending}</p>
+          <span style={styles.statLabel}>Pending requests</span>
         </div>
       </div>
-      <div className="card p-3 flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-indigo-500/20">
-          <Activity size={18} className="text-indigo-400" />
+      <div style={styles.statCard}>
+        <div style={{ ...styles.statIcon, background: 'rgba(99, 102, 241, 0.2)' }}>
+          <Activity size={18} color="#818cf8" />
         </div>
         <div>
-          <p className="text-lg font-bold text-white">{stats.avgWait}m</p>
-          <p className="text-xs text-slate-500">Avg wait time</p>
+          <p style={styles.statValue}>{stats.avgWait || 'N/A'}</p>
+          <span style={styles.statLabel}>Avg wait (min)</span>
         </div>
       </div>
     </div>
@@ -94,50 +311,40 @@ export default function LiveFeedPage() {
   const [activities, setActivities] = useState([]);
   const [isPaused, setIsPaused] = useState(false);
   const [filter, setFilter] = useState('all');
-  const [stats, setStats] = useState({ checkIns: 0, pending: 0, completed: 0, avgWait: 0 });
-  const lastIdRef = useRef(0);
+  const [stats, setStats] = useState({ parked: 0, checkIns: 0, pending: 0, avgWait: 0 });
 
   const fetchActivity = async () => {
     if (isPaused) return;
     
     try {
-      // Fetch vehicles
+      const statsRes = await fetch(`${API_BASE_URL}/stats`);
+      const statsData = await statsRes.json();
+      
       const vehiclesRes = await fetch(`${API_BASE_URL}/vehicles`);
       const vehiclesData = await vehiclesRes.json();
       const vehicles = vehiclesData.vehicles || [];
       
-      // Fetch queue
       const queueRes = await fetch(`${API_BASE_URL}/queue`);
       const queueData = await queueRes.json();
       const requests = queueData.requests || [];
       
-      // Fetch stats
-      const statsRes = await fetch(`${API_BASE_URL}/stats`);
-      const statsData = await statsRes.json();
-      
-      // Update stats
       setStats({
-        checkIns: vehicles.filter(v => {
-          const checkIn = new Date(v.check_in_time);
-          const today = new Date();
-          return checkIn.toDateString() === today.toDateString();
-        }).length,
-        pending: requests.filter(r => r.status === 'pending').length,
-        completed: requests.filter(r => r.status === 'completed').length,
-        avgWait: statsData.stats?.avgWaitTime || statsData.avgWaitTime || 0,
+        parked: statsData.parked || 0,
+        checkIns: statsData.today?.checkins || 0,
+        pending: statsData.today?.pending || requests.filter(r => r.status === 'pending').length,
+        avgWait: statsData.today?.avgWaitMinutes || null,
       });
       
-      // Build activity list
       const newActivities = [];
       
       vehicles.forEach(v => {
         newActivities.push({
           id: `v-${v.id}`,
           type: 'checkin',
-          message: `${v.make || 'Vehicle'} ${v.model || ''} checked in`,
-          details: `License: ${v.license_plate || 'N/A'} • Hook: ${v.hook_number || 'N/A'}`,
+          message: `${v.license_plate || 'Vehicle'} (${v.make} ${v.model})`,
+          details: `Hook #${v.hook_number} • Seq #${v.sequence_number}`,
           venue: 'Fairmont Pittsburgh',
-          time: formatTime(v.check_in_time),
+          time: formatTimeEST(v.check_in_time),
           timestamp: new Date(v.check_in_time).getTime(),
         });
       });
@@ -146,31 +353,21 @@ export default function LiveFeedPage() {
         newActivities.push({
           id: `r-${r.id}`,
           type: r.status,
-          message: `Retrieval ${r.status} for card ${r.unique_card_id?.slice(0, 15) || 'unknown'}...`,
-          details: r.assigned_driver_id ? `Driver assigned` : null,
+          isPriority: r.is_priority === 1,
+          message: `${r.license_plate || 'Vehicle'} - ${r.status.toUpperCase()}`,
+          details: `Hook #${r.hook_number} • $${r.amount || 0} ${r.payment_method === 'pay_at_counter' ? '(Pay at counter)' : ''}`,
           venue: 'Fairmont Pittsburgh',
-          time: formatTime(r.requested_at),
+          time: formatTimeEST(r.requested_at),
           timestamp: new Date(r.requested_at).getTime(),
+          driver: r.driver_name,
         });
       });
       
-      // Sort by timestamp descending
       newActivities.sort((a, b) => b.timestamp - a.timestamp);
-      
       setActivities(newActivities.slice(0, 50));
     } catch (error) {
       console.error('Error fetching activity:', error);
     }
-  };
-
-  const formatTime = (timestamp) => {
-    if (!timestamp) return 'Just now';
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit',
-      hour12: true 
-    });
   };
 
   useEffect(() => {
@@ -179,33 +376,53 @@ export default function LiveFeedPage() {
     return () => clearInterval(interval);
   }, [isPaused]);
 
-  const filteredActivities = activities.filter(a => 
-    filter === 'all' || a.type === filter
-  );
+  const filteredActivities = activities.filter(a => {
+    if (filter === 'all') return true;
+    if (filter === 'checkin') return a.type === 'checkin';
+    if (filter === 'request') return ['pending', 'assigned', 'ready'].includes(a.type);
+    if (filter === 'complete') return ['completed', 'complete'].includes(a.type);
+    return a.type === filter;
+  });
+
+  const filters = [
+    { key: 'all', label: 'All' },
+    { key: 'checkin', label: 'Check-ins' },
+    { key: 'request', label: 'Requests' },
+    { key: 'complete', label: 'Completed' },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div style={styles.container}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div style={styles.header}>
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            Live Activity Feed
-            <span className="flex items-center gap-1.5 text-sm font-normal text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-dot"></span>
+          <div style={styles.titleRow}>
+            <h1 style={styles.title}>Live Activity Feed</h1>
+            <div style={{ 
+              ...styles.liveIndicator, 
+              color: isPaused ? '#fbbf24' : '#34d399' 
+            }}>
+              <div style={{ 
+                ...styles.liveDot, 
+                background: isPaused ? '#fbbf24' : '#34d399' 
+              }} />
               {isPaused ? 'Paused' : 'Live'}
-            </span>
-          </h1>
-          <p className="text-slate-500">Real-time activity across all venues</p>
+            </div>
+          </div>
+          <p style={styles.subtitle}>Real-time activity • EST timezone</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div style={styles.headerRight}>
           <button 
             onClick={() => setIsPaused(!isPaused)}
-            className={`btn ${isPaused ? 'btn-success' : 'btn-warning'}`}
+            style={{ 
+              ...styles.btn, 
+              ...(isPaused ? styles.btnSuccess : styles.btnWarning) 
+            }}
           >
             {isPaused ? <Play size={18} /> : <Pause size={18} />}
             {isPaused ? 'Resume' : 'Pause'}
           </button>
-          <button onClick={fetchActivity} className="btn btn-ghost">
+          <button onClick={fetchActivity} style={{ ...styles.btn, ...styles.btnGhost }}>
             <RefreshCw size={18} />
             Refresh
           </button>
@@ -216,43 +433,53 @@ export default function LiveFeedPage() {
       <StatsBar stats={stats} />
 
       {/* Filters */}
-      <div className="flex items-center gap-2">
-        <Filter size={16} className="text-slate-500" />
-        {['all', 'checkin', 'request', 'assigned', 'ready', 'complete'].map((f) => (
+      <div style={styles.filterRow}>
+        <Filter size={16} color="#64748b" />
+        {filters.map((f) => (
           <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-              filter === f 
-                ? 'bg-indigo-600 text-white' 
-                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-            }`}
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            style={{ 
+              ...styles.filterBtn, 
+              ...(filter === f.key ? styles.filterBtnActive : styles.filterBtnInactive) 
+            }}
           >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {f.label}
           </button>
         ))}
       </div>
 
       {/* Activity Feed */}
-      <div className="card overflow-hidden">
-        <div className="max-h-[calc(100vh-380px)] overflow-y-auto">
+      <div style={styles.feedCard}>
+        <div style={styles.feedContainer}>
           {filteredActivities.length > 0 ? (
             filteredActivities.map((activity, index) => (
               <ActivityItem 
                 key={activity.id} 
                 activity={activity} 
-                isNew={index === 0}
+                isNew={index === 0 && !isPaused}
               />
             ))
           ) : (
-            <div className="text-center py-12">
-              <Activity size={48} className="mx-auto text-slate-600 mb-4" />
-              <h3 className="text-lg font-medium text-white mb-2">No activity</h3>
-              <p className="text-slate-500">Activity will appear here in real-time</p>
+            <div style={styles.emptyState}>
+              <Activity size={48} color="#475569" style={{ marginBottom: '16px' }} />
+              <h3 style={{ color: 'white', fontWeight: '500', marginBottom: '8px' }}>No activity</h3>
+              <p style={{ color: '#64748b' }}>Activity will appear here in real-time</p>
             </div>
           )}
         </div>
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
